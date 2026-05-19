@@ -916,11 +916,31 @@ function showLoginScreen(){
   updateOnlineStatus();
 }
 
-function doLogin(){
+async function doLogin(){
   const email=$('#login-email').value.trim(), pass=$('#login-pass').value;
   const err=$('#login-error'); if(err)err.style.display='none';
-  if(login(email,pass)) showApp();
-  else if(err)err.style.display='flex';
+  const btn=$('button.btn-primary');
+  if(btn){btn.textContent='Verificando...';btn.disabled=true;}
+
+  // Intentar login local primero
+  if(login(email,pass)){ showApp(); return; }
+
+  // Si falla, cargar usuarios desde Supabase y reintentar
+  try {
+    const r = await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/usuarios?select=*`, {
+      headers:{ 'apikey':CONFIG.SUPABASE_KEY, 'Authorization':'Bearer '+CONFIG.SUPABASE_KEY }
+    });
+    if(r.ok){
+      const usuarios = await r.json();
+      if(usuarios&&usuarios.length>0){
+        DB.set('usuarios', usuarios);
+        if(login(email,pass)){ showApp(); return; }
+      }
+    }
+  } catch(e){ console.log('Error cargando usuarios:', e); }
+
+  if(btn){btn.textContent='Ingresar →';btn.disabled=false;}
+  if(err)err.style.display='flex';
 }
 
 function showApp(){
