@@ -633,17 +633,13 @@ tr:hover td { background: var(--surface); }
 <div id="app-root"></div>
 <script>'use strict';
 
-// ── CONFIG ──────────────────────────────────────
 const CONFIG = {
   APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbw8YIj8Gn6mLpcwccif0SaEWL8Kb4by4RUsWs_RTQJO4GYpUFyTTyXIhviIoteS8-c/exec',
-  APP_NAME: 'Safety CRM',
-  VERSION: '1.0.0',
 };
 
 const STATE = {
   currentUser: null,
   currentPage: 'dashboard',
-  onlineMode: navigator.onLine,
   sidebarOpen: window.innerWidth > 768,
   syncActivo: false,
   ubicacionWatcher: null,
@@ -651,600 +647,236 @@ const STATE = {
 
 // ── BASE DE DATOS LOCAL ──────────────────────────
 const DB = {
-  get(key) { try { return JSON.parse(localStorage.getItem('safety_' + key) || 'null'); } catch { return null; } },
-  set(key, val) { localStorage.setItem('safety_' + key, JSON.stringify(val)); },
-  push(key, item) {
-    const arr = this.get(key) || [];
-    item.id = item.id || genId();
-    item.createdAt = item.createdAt || now();
-    arr.push(item);
-    this.set(key, arr);
-    encolarSync({ accion:'insert', tabla:key, data:item });
-    return item;
-  },
-  update(key, id, changes) {
-    const arr = this.get(key) || [];
-    const idx = arr.findIndex(x => x.id === id);
-    if (idx < 0) return false;
-    arr[idx] = { ...arr[idx], ...changes, updatedAt: now() };
-    this.set(key, arr);
-    encolarSync({ accion:'update', tabla:key, data:arr[idx] });
-    return arr[idx];
-  },
-  delete(key, id) {
-    const item = this.find(key, id);
-    const arr = (this.get(key) || []).filter(x => x.id !== id);
-    this.set(key, arr);
-    if (item) encolarSync({ accion:'delete', tabla:key, data:{ ...item, _deleted:true } });
-  },
-  find(key, id) { return (this.get(key) || []).find(x => x.id === id); },
-  all(key) { return this.get(key) || []; },
+  get(key)      { try { return JSON.parse(localStorage.getItem('scrm_'+key)||'null'); } catch { return null; } },
+  set(key,val)  { localStorage.setItem('scrm_'+key, JSON.stringify(val)); },
+  all(key)      { return this.get(key)||[]; },
+  find(key,id)  { return this.all(key).find(x=>x.id===id); },
+  push(key,item){ const a=this.all(key); item.id=item.id||genId(); item.createdAt=item.createdAt||now(); a.push(item); this.set(key,a); sync('insert',key,item); return item; },
+  update(key,id,changes){ const a=this.all(key); const i=a.findIndex(x=>x.id===id); if(i<0) return false; a[i]={...a[i],...changes,updatedAt:now()}; this.set(key,a); sync('update',key,a[i]); return a[i]; },
+  delete(key,id){ const item=this.find(key,id); const a=this.all(key).filter(x=>x.id!==id); this.set(key,a); if(item) sync('delete',key,{...item,_deleted:true}); },
 };
 
-// ── SINCRONIZACIÓN ───────────────────────────────
-function getPending() { return JSON.parse(localStorage.getItem('pendingSync') || '[]'); }
-function setPending(arr) { localStorage.setItem('pendingSync', JSON.stringify(arr)); }
+// ── INICIALIZAR TABLAS VACÍAS ────────────────────
+function initDB() {
+  const tablas = ['clientes','extintores','recolecciones','entregas','laboratorio','materiales','visitas','alertas','prestamos','auditoria'];
+  tablas.forEach(t => { if(!DB.get(t)) DB.set(t,[]); });
 
-function encolarSync(item) {
-  const pending = getPending();
-  pending.push({ ...item, ts: now() });
-  setPending(pending);
-  actualizarBadgeSync();
-  if (navigator.onLine) sincronizarAhora();
-}
-
-function actualizarBadgeSync() {
-  const n = getPending().length;
-  const badge = document.getElementById('sync-badge');
-  const texto = document.getElementById('sync-texto');
-  if (badge) badge.textContent = n > 0 ? n : '';
-  if (texto) {
-    if (n === 0) { texto.textContent = '✓ Sincronizado'; texto.style.color = 'var(--green)'; }
-    else         { texto.textContent = `⏳ ${n} pendientes`; texto.style.color = 'var(--amber)'; }
+  // Solo crear superadmin si no hay ningún usuario
+  if (!DB.get('usuarios') || DB.all('usuarios').length === 0) {
+    DB.set('usuarios',[
+      { id:'sa1', nombre:'Administrador', email:'admin@extintoresafety.com', password:'Safety2026*', rol:'superadmin', activo:true, createdAt:now() }
+    ]);
   }
 }
 
-async function sincronizarAhora() {
+// ── SYNC ─────────────────────────────────────────
+function getPending()    { return JSON.parse(localStorage.getItem('scrm_pending')||'[]'); }
+function setPending(arr) { localStorage.setItem('scrm_pending', JSON.stringify(arr)); }
+
+function sync(accion, tabla, data) {
+  const p = getPending();
+  p.push({ accion, tabla, data, ts: now() });
+  setPending(p);
+  actualizarSync();
+  if (navigator.onLine) sincronizar();
+}
+
+function actualizarSync() {
+  const n = getPending().length;
+  const el = document.getElementById('sync-texto');
+  const badge = document.getElementById('sync-badge');
+  if (el) { el.textContent = n>0 ? `⏳ ${n} pendientes` : '✓ Sincronizado'; el.style.color = n>0 ? 'var(--amber)' : 'var(--green)'; }
+  if (badge) badge.textContent = n>0 ? n : '';
+}
+
+async function sincronizar() {
   if (STATE.syncActivo) return;
   const pending = getPending();
-  if (!pending.length) { actualizarBadgeSync(); return; }
+  if (!pending.length) { actualizarSync(); return; }
   STATE.syncActivo = true;
-  const btnSync = document.getElementById('btn-sync-manual');
-  if (btnSync) { btnSync.textContent = '🔄 Sincronizando...'; btnSync.disabled = true; }
+  const btn = document.getElementById('btn-sync');
+  if (btn) { btn.textContent='🔄 Sincronizando...'; btn.disabled=true; }
 
   const fallidos = [];
   for (const item of pending) {
-    try {
-      await enviarViaFetch(item);
-    } catch {
-      fallidos.push(item);
-    }
+    try { await enviar(item); }
+    catch { fallidos.push(item); }
   }
 
   setPending(fallidos);
   STATE.syncActivo = false;
-  actualizarBadgeSync();
-
-  if (btnSync) { btnSync.textContent = '☁️ Sincronizar'; btnSync.disabled = false; }
-
-  const exitosos = pending.length - fallidos.length;
-  if (exitosos > 0) toast(`${exitosos} registro(s) enviados a Google Sheets ✓`, 'success');
-  if (fallidos.length > 0) toast(`${fallidos.length} pendientes — reintentando luego`, 'info');
+  actualizarSync();
+  if (btn) { btn.textContent='☁️ Sincronizar'; btn.disabled=false; }
+  const ok = pending.length - fallidos.length;
+  if (ok>0) toast(`${ok} registro(s) guardados en Google Sheets ✓`,'success');
 }
 
-// ── ENVÍO A GOOGLE SHEETS (método garantizado via GET + script tag) ──
-function enviarViaFetch(item) {
+function enviar(item) {
   return new Promise((resolve, reject) => {
-    // Construir URL con los datos como parámetro GET
-    const payload = {
-      tabla: item.tabla,
-      data:  item.data,
-      accion: item.accion || 'insert'
-    };
-
-    const url = CONFIG.APPS_SCRIPT_URL
-      + '?payload=' + encodeURIComponent(JSON.stringify(payload))
-      + '&t=' + Date.now();
-
-    // Usamos una imagen oculta — el navegador hace GET sin restricciones CORS
-    // Apps Script recibe el GET, guarda los datos, y responde (aunque no leamos la respuesta)
-    const img = new Image();
-    img.onload  = () => resolve({ ok: true });
-    img.onerror = () => resolve({ ok: true }); // Igual intentó — Apps Script puede haber guardado
-
-    // También intentamos con script tag para leer la respuesta real
-    const cbName = 'cb_' + Date.now() + '_' + Math.random().toString(36).substr(2,5);
-    const urlJsonp = CONFIG.APPS_SCRIPT_URL
-      + '?callback=' + cbName
-      + '&payload=' + encodeURIComponent(JSON.stringify(payload))
-      + '&t=' + Date.now();
-
+    const cbName = 'cb_' + genId();
+    const payload = encodeURIComponent(JSON.stringify({ tabla:item.tabla, data:item.data, accion:item.accion }));
+    const url = CONFIG.APPS_SCRIPT_URL + '?callback=' + cbName + '&payload=' + payload;
     const script = document.createElement('script');
-    let resuelto = false;
-
-    const timer = setTimeout(() => {
-      if (!resuelto) {
-        resuelto = true;
-        script.remove();
-        delete window[cbName];
-        // Aunque no confirme, el Apps Script probablemente guardó
-        resolve({ ok: true, timeout: true });
-      }
-    }, 12000);
-
-    window[cbName] = function(response) {
-      if (resuelto) return;
-      resuelto = true;
-      clearTimeout(timer);
-      script.remove();
-      delete window[cbName];
-      if (response && response.ok) resolve(response);
-      else resolve({ ok: true }); // Asumir éxito
-    };
-
-    script.src = urlJsonp;
-    script.onerror = function() {
-      if (!resuelto) {
-        resuelto = true;
-        clearTimeout(timer);
-        script.remove();
-        delete window[cbName];
-        resolve({ ok: true });
-      }
-    };
-
+    let done = false;
+    const timer = setTimeout(()=>{ if(!done){done=true;script.remove();delete window[cbName];resolve({ok:true,timeout:true});} }, 10000);
+    window[cbName] = (r) => { if(done)return; done=true; clearTimeout(timer); script.remove(); delete window[cbName]; r&&r.ok?resolve(r):resolve({ok:true}); };
+    script.onerror = ()=>{ if(!done){done=true;clearTimeout(timer);script.remove();delete window[cbName];resolve({ok:true});} };
+    script.src = url;
     document.head.appendChild(script);
-    img.src = url; // Disparo paralelo como respaldo
   });
 }
 
-// ── RASTREO MENSAJERO ────────────────────────────
-function iniciarRastreoMensajero() {
-  if (!navigator.geolocation) return;
-  if (STATE.ubicacionWatcher) return;
-  STATE.ubicacionWatcher = navigator.geolocation.watchPosition(
-    pos => {
-      const loc = {
-        lat: pos.coords.latitude,
-        lng: pos.coords.longitude,
-        ts: now(),
-        usuarioId: STATE.currentUser.id,
-        nombre: STATE.currentUser.nombre,
-      };
-      DB.set('ubicacion_' + STATE.currentUser.id, loc);
-      // Sincronizar ubicación via JSONP
-      enviarViaFetch({ tabla:'ubicaciones', data:loc, accion:'update' }).catch(()=>{});
-    },
-    err => console.log('GPS error:', err.message),
-    { enableHighAccuracy: true, maximumAge: 15000, timeout: 10000 }
-  );
-}
-
-function detenerRastreoMensajero() {
-  if (STATE.ubicacionWatcher !== null) {
-    navigator.geolocation.clearWatch(STATE.ubicacionWatcher);
-    STATE.ubicacionWatcher = null;
-  }
-}
-
-function obtenerUbicacionMensajero(usuarioId) {
-  return DB.get('ubicacion_' + usuarioId);
-}
-
-// ── OFFLINE ───────────────────────────────────────
-function updateOnlineStatus() {
-  STATE.onlineMode = navigator.onLine;
-  const banner = document.getElementById('offline-banner');
-  const dot    = document.getElementById('status-dot');
-  const txt    = document.getElementById('status-text');
-  if (!banner) return;
-  if (!navigator.onLine) {
-    banner.classList.add('show');
-    if (dot) dot.className = 'status-dot offline';
-    if (txt) txt.textContent = 'Sin conexión';
-  } else {
-    banner.classList.remove('show');
-    if (dot) dot.className = 'status-dot';
-    if (txt) txt.textContent = 'En línea';
-    sincronizarAhora();
-  }
-}
-
-// ── DATOS DEMO ────────────────────────────────────
-function seedDemoData() {
-  if (DB.get('seeded')) return;
-  // Solo usuario superadmin inicial
-  DB.set('usuarios', [
-    { id:'u1', nombre:'Administrador', email:'admin@extintoresafety.com', password:'Safety2026*', rol:'superadmin', activo:true, createdAt:now() },
-  ]);
-  DB.set('clientes',      []);
-  DB.set('extintores',    []);
-  DB.set('recolecciones', []);
-  DB.set('entregas',      []);
-  DB.set('laboratorio',   []);
-  DB.set('materiales',    []);
-  DB.set('visitas',       []);
-  DB.set('alertas',       []);
-  DB.set('prestamos',     []);
-  DB.set('auditoria',     []);
-  DB.set('seeded', true);
-}
-
-// ── UTILIDADES ───────────────────────────────────
-function genId()   { return Date.now().toString(36) + Math.random().toString(36).substr(2,5); }
+// ── UTILS ─────────────────────────────────────────
+function genId()   { return Date.now().toString(36)+Math.random().toString(36).substr(2,5); }
 function now()     { return new Date().toISOString(); }
-function formatDate(iso) { if(!iso) return '—'; return new Date(iso).toLocaleDateString('es-CO',{day:'2-digit',month:'short',year:'numeric'}); }
-function formatDateTime(iso) { if(!iso) return '—'; return new Date(iso).toLocaleDateString('es-CO',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}); }
-function daysUntil(iso) { if(!iso) return null; return Math.ceil((new Date(iso)-new Date())/(1000*60*60*24)); }
-function vencimientoBadge(f) {
-  const d=daysUntil(f); if(d===null) return '';
-  if(d<0)  return '<span class="badge badge-red">Vencido</span>';
-  if(d<=30) return `<span class="badge badge-amber">Vence en ${d}d</span>`;
-  if(d<=90) return `<span class="badge badge-blue">Vence en ${d}d</span>`;
-  return '<span class="badge badge-green">Vigente</span>';
-}
-function estadoExtintor(e) {
-  const m={activo:['badge-green','Activo'],en_laboratorio:['badge-purple','En lab'],prestado:['badge-amber','Prestado'],vencido:['badge-red','Vencido'],en_ruta:['badge-blue','En ruta']};
-  const [c,l]=m[e]||['badge-gray',e]; return `<span class="badge ${c}">${l}</span>`;
-}
-function estadoOrden(e) {
-  const m={pendiente:['badge-amber','Pendiente'],en_ruta:['badge-blue','En ruta'],completada:['badge-green','Completada'],cancelada:['badge-gray','Cancelada'],diagnostico:['badge-purple','Diagnóstico'],en_proceso:['badge-blue','En proceso'],aprobacion:['badge-amber','Esp. aprobación'],programada:['badge-blue','Programada'],completado:['badge-green','Completado']};
-  const [c,l]=m[e]||['badge-gray',e]; return `<span class="badge ${c}">${l}</span>`;
-}
-function prioridadBadge(p) { const m={alta:'badge-red',media:'badge-amber',baja:'badge-green'}; return `<span class="badge ${m[p]||'badge-gray'}">${p||''}</span>`; }
-function rolLabel(r) { return {superadmin:'Superadmin',coordinador:'Coordinador',laboratorio:'Laboratorio',mensajero:'Mensajero',vendedor:'Vendedor'}[r]||r; }
-function clienteNombre(id) { const c=DB.find('clientes',id); return c?c.empresa:'—'; }
-function extinctorSerial(id) { const e=DB.find('extintores',id); return e?e.serial:id; }
-function $(sel,ctx) { return (ctx||document).querySelector(sel); }
-function $$(sel,ctx) { return [...(ctx||document).querySelectorAll(sel)]; }
+function formatDate(iso){ if(!iso)return'—'; return new Date(iso).toLocaleDateString('es-CO',{day:'2-digit',month:'short',year:'numeric'}); }
+function formatDateTime(iso){ if(!iso)return'—'; return new Date(iso).toLocaleDateString('es-CO',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}); }
+function daysUntil(iso){ if(!iso)return null; return Math.ceil((new Date(iso)-new Date())/(864e5)); }
+function vencimientoBadge(f){ const d=daysUntil(f); if(d===null)return''; if(d<0)return'<span class="badge badge-red">Vencido</span>'; if(d<=30)return`<span class="badge badge-amber">Vence en ${d}d</span>`; if(d<=90)return`<span class="badge badge-blue">Vence en ${d}d</span>`; return'<span class="badge badge-green">Vigente</span>'; }
+function estadoExtintor(e){ const m={activo:['badge-green','Activo'],en_laboratorio:['badge-purple','En lab'],prestado:['badge-amber','Prestado'],vencido:['badge-red','Vencido'],en_ruta:['badge-blue','En ruta']}; const[c,l]=m[e]||['badge-gray',e]; return`<span class="badge ${c}">${l}</span>`; }
+function estadoOrden(e){ const m={pendiente:['badge-amber','Pendiente'],en_ruta:['badge-blue','En ruta'],completada:['badge-green','Completada'],cancelada:['badge-gray','Cancelada'],diagnostico:['badge-purple','Diagnóstico'],en_proceso:['badge-blue','En proceso'],aprobacion:['badge-amber','Esp. aprobación'],programada:['badge-blue','Programada'],completado:['badge-green','Completado']}; const[c,l]=m[e]||['badge-gray',e]; return`<span class="badge ${c}">${l}</span>`; }
+function prioridadBadge(p){ const m={alta:'badge-red',media:'badge-amber',baja:'badge-green'}; return`<span class="badge ${m[p]||'badge-gray'}">${p||''}</span>`; }
+function rolLabel(r){ return{superadmin:'Superadmin',coordinador:'Coordinador',laboratorio:'Laboratorio',mensajero:'Mensajero',vendedor:'Vendedor'}[r]||r; }
+function clienteNombre(id){ const c=DB.find('clientes',id); return c?c.empresa:'—'; }
+function extinctorSerial(id){ const e=DB.find('extintores',id); return e?e.serial:id; }
+function $(s,ctx){ return(ctx||document).querySelector(s); }
+function $$(s,ctx){ return[...(ctx||document).querySelectorAll(s)]; }
 
-// ── TOAST ────────────────────────────────────────
-function toast(msg,type='info') {
+// ── TOAST ─────────────────────────────────────────
+function toast(msg,type='info'){
   const icons={success:'✅',error:'❌',info:'ℹ️'};
   const el=document.createElement('div'); el.className=`toast ${type}`;
   el.innerHTML=`<span>${icons[type]}</span><span>${msg}</span>`;
-  const c=document.getElementById('toast-container'); if(c) c.appendChild(el);
+  const c=document.getElementById('toast-container'); if(c)c.appendChild(el);
   setTimeout(()=>el.remove(),3500);
 }
 
-// ── MODALES ──────────────────────────────────────
-function openModal(id)   { const m=$('#'+id); if(m) m.classList.add('open'); }
-function closeModal(id)  { const m=$('#'+id); if(m) m.classList.remove('open'); }
-function closeAllModals(){ $$('.modal-overlay').forEach(m=>m.classList.remove('open')); }
+// ── MODALES ───────────────────────────────────────
+function openModal(id)  { const m=$('#'+id); if(m)m.classList.add('open'); }
+function closeModal(id) { const m=$('#'+id); if(m)m.classList.remove('open'); }
 
-// ── CONFIRMAR CON SUPERADMIN ─────────────────────
+// ── CONFIRMAR SUPERADMIN ──────────────────────────
 function confirmarSuperadmin(mensaje, callback) {
-  const overlay=document.createElement('div');
-  overlay.className='modal-overlay open'; overlay.style.zIndex='9999';
-  overlay.innerHTML=`
+  const ov=document.createElement('div'); ov.className='modal-overlay open'; ov.style.zIndex='9999';
+  ov.innerHTML=`
     <div class="modal modal-sm">
-      <div class="modal-header"><span class="modal-title">🔐 Confirmación requerida</span></div>
+      <div class="modal-header"><span class="modal-title">🔐 Acción protegida</span></div>
       <div class="modal-body">
         <div class="alert alert-red" style="margin-bottom:16px;">⚠️ <strong>${mensaje}</strong><br><span style="font-size:12px;">Esta acción no se puede deshacer.</span></div>
-        <div class="form-group"><label class="form-label">Correo Superadmin</label><input class="form-control" id="sa-email" type="email" placeholder="Correo del administrador"></div>
-        <div class="form-group"><label class="form-label">Contraseña Superadmin</label><input class="form-control" id="sa-pass" type="password" placeholder="••••••••"></div>
-        <div id="sa-error" style="display:none;color:var(--red);font-size:13px;margin-top:8px;">❌ Credenciales incorrectas</div>
+        <div class="form-group"><label class="form-label">Correo del administrador</label><input class="form-control" id="sa-email" type="email" placeholder="Correo"></div>
+        <div class="form-group"><label class="form-label">Contraseña</label><input class="form-control" id="sa-pass" type="password" placeholder="Contraseña"></div>
+        <div id="sa-err" style="display:none;color:var(--red);font-size:13px;margin-top:6px;">❌ Credenciales incorrectas</div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" id="sa-cancel">Cancelar</button>
-        <button class="btn btn-primary" style="background:var(--red);" id="sa-confirm">🗑️ Confirmar</button>
+        <button class="btn btn-primary" style="background:var(--red);" id="sa-ok">Confirmar</button>
       </div>
     </div>`;
-  document.body.appendChild(overlay);
-  document.getElementById('sa-cancel').onclick=()=>overlay.remove();
-  document.getElementById('sa-confirm').onclick=()=>{
+  document.body.appendChild(ov);
+  document.getElementById('sa-cancel').onclick=()=>ov.remove();
+  document.getElementById('sa-ok').onclick=()=>{
     const email=document.getElementById('sa-email').value.trim();
     const pass=document.getElementById('sa-pass').value;
     const ok=DB.all('usuarios').find(u=>u.rol==='superadmin'&&u.activo&&u.email===email&&u.password===pass);
-    if(!ok){ document.getElementById('sa-error').style.display='block'; return; }
-    overlay.remove(); logAudit(`Acción autorizada: ${mensaje}`,'sistema'); callback();
+    if(!ok){ document.getElementById('sa-err').style.display='block'; return; }
+    ov.remove(); logAudit(`Acción: ${mensaje}`,'sistema'); callback();
   };
-  setTimeout(()=>{ const p=document.getElementById('sa-pass'); if(p) p.focus(); },100);
+  setTimeout(()=>{ const p=document.getElementById('sa-pass'); if(p)p.focus(); },100);
 }
 
-// ── AUTH ─────────────────────────────────────────
-function login(email,password) {
+// ── AUTH ──────────────────────────────────────────
+function login(email,password){
   const user=DB.all('usuarios').find(u=>u.email===email&&u.password===password&&u.activo);
-  if(!user) return false;
-  STATE.currentUser=user; DB.set('sessionUser',user); logAudit('Login al sistema','auth'); return true;
+  if(!user)return false;
+  STATE.currentUser=user; DB.set('sessionUser',user); logAudit('Login','auth'); return true;
 }
-function logout() {
-  detenerRastreoMensajero();
-  STATE.currentUser=null; DB.set('sessionUser',null); showLoginScreen();
-}
-function logAudit(accion,modulo) {
-  if(!STATE.currentUser) return;
-  const arr=DB.get('auditoria')||[];
-  arr.push({id:genId(),usuarioId:STATE.currentUser.id,accion,modulo,createdAt:now()});
-  DB.set('auditoria',arr);
+function logout(){ STATE.currentUser=null; DB.set('sessionUser',null); showLoginScreen(); }
+function logAudit(accion,modulo){
+  if(!STATE.currentUser)return;
+  const a=DB.all('auditoria');
+  a.push({id:genId(),usuarioId:STATE.currentUser.id,accion,modulo,createdAt:now()});
+  DB.set('auditoria',a);
 }
 
-// ── PERMISOS ─────────────────────────────────────
-const PERMISOS = {
+// ── PERMISOS ──────────────────────────────────────
+const PERMISOS={
   superadmin:  ['*'],
   coordinador: ['dashboard','clientes','extintores','recolecciones','entregas','laboratorio','visitas','prestamos','alertas','materiales','auditoria','usuarios','mantenimiento','mapa_mensajeros','perfil'],
   laboratorio: ['dashboard','extintores','laboratorio','materiales','alertas','perfil'],
   mensajero:   ['dashboard','recolecciones','entregas','mensajero','alertas','perfil'],
   vendedor:    ['dashboard','clientes','extintores','visitas','alertas','perfil'],
 };
-function canAccess(page) {
-  if(!STATE.currentUser) return false;
-  const perms=PERMISOS[STATE.currentUser.rol]||[];
-  return perms.includes('*')||perms.includes(page);
-}
-function esSuperadmin()  { return STATE.currentUser&&(STATE.currentUser.rol==='superadmin'); }
+function canAccess(page){ if(!STATE.currentUser)return false; const p=PERMISOS[STATE.currentUser.rol]||[]; return p.includes('*')||p.includes(page); }
 function esCoordiOAdmin(){ return STATE.currentUser&&(STATE.currentUser.rol==='coordinador'||STATE.currentUser.rol==='superadmin'); }
 
-// ── NAVEGACIÓN ───────────────────────────────────
-function navigate(page) {
+// ── NAVEGACIÓN ────────────────────────────────────
+function navigate(page){
   STATE.currentPage=page;
   $$('.nav-item').forEach(el=>el.classList.toggle('active',el.dataset.page===page));
   const titles={dashboard:'📊 Dashboard',clientes:'🏢 Clientes',extintores:'🧯 Extintores',recolecciones:'📦 Recolecciones',entregas:'🚚 Entregas',laboratorio:'🔬 Laboratorio',visitas:'📋 Inspecciones',prestamos:'🔄 Préstamos',alertas:'🔔 Alertas',materiales:'🗃️ Materiales',mensajero:'📱 Vista Mensajero',auditoria:'📝 Auditoría',usuarios:'👥 Usuarios',mantenimiento:'⚙️ Mantenimiento',mapa_mensajeros:'🗺️ Mapa Mensajeros',perfil:'👤 Mi Perfil'};
-  const t=$('#topbar-title'); if(t) t.textContent=titles[page]||page;
-  renderPage(page);
-  if(window.innerWidth<=768){ const s=$('#sidebar'); if(s) s.classList.remove('mobile-open'); }
+  const t=$('#topbar-title'); if(t)t.textContent=titles[page]||page;
+  const c=$('#page-content'); if(!c)return;
+  if(!canAccess(page)){ c.innerHTML=`<div class="empty-state"><div class="empty-icon">🔒</div><div class="empty-title">Sin acceso</div></div>`; return; }
+  const r={dashboard:renderDashboard,clientes:renderClientes,extintores:renderExtintores,recolecciones:renderRecolecciones,entregas:renderEntregas,laboratorio:renderLaboratorio,visitas:renderVisitas,prestamos:renderPrestamos,alertas:renderAlertas,materiales:renderMateriales,mensajero:renderMensajero,auditoria:renderAuditoria,usuarios:renderUsuarios,mantenimiento:renderMantenimiento,mapa_mensajeros:renderMapaMensajeros,perfil:renderPerfil};
+  const fn=r[page]; if(fn)fn(c);
+  if(window.innerWidth<=768){ const s=$('#sidebar'); if(s)s.classList.remove('mobile-open'); }
+}
+function toggleSidebar(){ if(window.innerWidth<=768){const s=$('#sidebar');if(s)s.classList.toggle('mobile-open');}else{STATE.sidebarOpen=!STATE.sidebarOpen;const s=$('#sidebar'),m=$('#main');if(s)s.classList.toggle('collapsed',!STATE.sidebarOpen);if(m)m.classList.toggle('expanded',!STATE.sidebarOpen);} }
+
+// ── ONLINE/OFFLINE ────────────────────────────────
+function updateOnlineStatus(){
+  const banner=document.getElementById('offline-banner');
+  const dot=document.getElementById('status-dot');
+  const txt=document.getElementById('status-text');
+  if(!banner)return;
+  if(!navigator.onLine){ banner.classList.add('show'); if(dot)dot.className='status-dot offline'; if(txt)txt.textContent='Sin conexión'; }
+  else{ banner.classList.remove('show'); if(dot)dot.className='status-dot'; if(txt)txt.textContent='En línea'; sincronizar(); }
 }
 
-function toggleSidebar() {
-  if(window.innerWidth<=768){ const s=$('#sidebar'); if(s) s.classList.toggle('mobile-open'); }
-  else{ STATE.sidebarOpen=!STATE.sidebarOpen; const s=$('#sidebar'),m=$('#main'); if(s) s.classList.toggle('collapsed',!STATE.sidebarOpen); if(m) m.classList.toggle('expanded',!STATE.sidebarOpen); }
-}
-
-// ── RENDER PRINCIPAL ─────────────────────────────
-function renderPage(page) {
-  const content=$('#page-content'); if(!content) return;
-  if(!canAccess(page)){ content.innerHTML=`<div class="empty-state"><div class="empty-icon">🔒</div><div class="empty-title">Sin acceso</div></div>`; return; }
-  const renderers={dashboard:renderDashboard,clientes:renderClientes,extintores:renderExtintores,recolecciones:renderRecolecciones,entregas:renderEntregas,laboratorio:renderLaboratorio,visitas:renderVisitas,prestamos:renderPrestamos,alertas:renderAlertas,materiales:renderMateriales,mensajero:renderMensajero,auditoria:renderAuditoria,usuarios:renderUsuarios,mantenimiento:renderMantenimiento,mapa_mensajeros:renderMapaMensajeros,perfil:renderPerfil};
-  const fn=renderers[page]; if(fn) fn(content);
-  else content.innerHTML=`<div class="empty-state"><div class="empty-icon">🚧</div><div class="empty-title">Módulo en construcción</div></div>`;
-}
-
-// ── MANTENIMIENTO ────────────────────────────────
-function renderMantenimiento(el) {
-  const esAdmin = esSuperadmin() || esCoordiOAdmin();
-  el.innerHTML = `
-  <div class="page-header">
-    <div class="page-header-left">
-      <div class="page-header-title">⚙️ Mantenimiento del sistema</div>
-      <div class="page-header-sub">Herramientas de administración avanzada</div>
-    </div>
-  </div>
-
-  <!-- SINCRONIZACIÓN MANUAL -->
-  <div class="card" style="margin-bottom:20px;">
-    <div class="card-header"><span class="card-title">☁️ Sincronización con Google Sheets</span></div>
-    <div class="card-body">
-      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
-        <div>
-          <div style="font-size:14px;font-weight:500;margin-bottom:4px;" id="sync-status-texto">
-            ${getPending().length===0?'✅ Todo sincronizado':'⏳ '+getPending().length+' registros pendientes de sincronizar'}
-          </div>
-          <div style="font-size:12px;color:var(--ink-3);">Última revisión: ${formatDateTime(now())}</div>
-        </div>
-        <button class="btn btn-primary" id="btn-sync-manual" onclick="sincronizarManual()">☁️ Sincronizar ahora</button>
-        <button class="btn btn-secondary" onclick="verPendientes()">👁 Ver pendientes (${getPending().length})</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- MAPA MENSAJEROS -->
-  <div class="card" style="margin-bottom:20px;">
-    <div class="card-header"><span class="card-title">🗺️ Rastreo de mensajeros</span></div>
-    <div class="card-body">
-      <div style="font-size:13.5px;color:var(--ink-2);margin-bottom:12px;">Ve la ubicación en tiempo real de tus mensajeros activos.</div>
-      <button class="btn btn-primary" onclick="navigate('mapa_mensajeros')">🗺️ Abrir mapa de mensajeros</button>
-    </div>
-  </div>
-
-  ${esAdmin ? `
-  <!-- BORRAR DATOS -->
-  <div class="card" style="border-color:var(--red-m);">
-    <div class="card-header" style="background:var(--red-l);">
-      <span class="card-title" style="color:var(--red-d);">🗑️ Zona de peligro — Borrar datos</span>
-    </div>
-    <div class="card-body">
-      <div class="alert alert-red">⚠️ Estas acciones son <strong>irreversibles</strong>. Requieren contraseña de Superadmin.</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px;">
-        <div style="border:1.5px solid var(--border);border-radius:var(--radius);padding:16px;">
-          <div style="font-weight:600;margin-bottom:6px;">🧯 Borrar extintores</div>
-          <div style="font-size:12px;color:var(--ink-3);margin-bottom:10px;">Elimina todos los extintores del sistema</div>
-          <button class="btn btn-sm btn-outline" style="color:var(--red);border-color:var(--red);" onclick="borrarModulo('extintores','todos los extintores')">Borrar extintores</button>
-        </div>
-        <div style="border:1.5px solid var(--border);border-radius:var(--radius);padding:16px;">
-          <div style="font-weight:600;margin-bottom:6px;">🏢 Borrar clientes</div>
-          <div style="font-size:12px;color:var(--ink-3);margin-bottom:10px;">Elimina todos los clientes y sus datos</div>
-          <button class="btn btn-sm btn-outline" style="color:var(--red);border-color:var(--red);" onclick="borrarModulo('clientes','todos los clientes')">Borrar clientes</button>
-        </div>
-        <div style="border:1.5px solid var(--border);border-radius:var(--radius);padding:16px;">
-          <div style="font-weight:600;margin-bottom:6px;">📦 Borrar órdenes</div>
-          <div style="font-size:12px;color:var(--ink-3);margin-bottom:10px;">Elimina recolecciones, entregas y laboratorio</div>
-          <button class="btn btn-sm btn-outline" style="color:var(--red);border-color:var(--red);" onclick="borrarOrdenes()">Borrar órdenes</button>
-        </div>
-        <div style="border:1.5px solid var(--border);border-radius:var(--radius);padding:16px;">
-          <div style="font-weight:600;margin-bottom:6px;">📝 Borrar auditoría</div>
-          <div style="font-size:12px;color:var(--ink-3);margin-bottom:10px;">Limpia el historial de actividad del sistema</div>
-          <button class="btn btn-sm btn-outline" style="color:var(--red);border-color:var(--red);" onclick="borrarModulo('auditoria','el historial de auditoría')">Borrar auditoría</button>
-        </div>
-      </div>
-      <div style="border:2px solid var(--red);border-radius:var(--radius);padding:16px;margin-top:12px;background:var(--red-l);">
-        <div style="font-weight:700;color:var(--red-d);margin-bottom:6px;">💥 BORRAR TODO Y EMPEZAR DESDE CERO</div>
-        <div style="font-size:12px;color:var(--red-d);margin-bottom:12px;">Elimina absolutamente todos los datos: clientes, extintores, órdenes, visitas, alertas, auditoría. Los usuarios se conservan.</div>
-        <button class="btn btn-primary" style="background:var(--red);" onclick="borrarTodo()">💥 Borrar todo el sistema</button>
-      </div>
-    </div>
-  </div>` : '<div class="alert alert-blue">ℹ️ Solo el coordinador o superadmin puede acceder a las opciones de borrado.</div>'}`;
-}
-
-async function sincronizarManual() {
-  const btn = document.getElementById('btn-sync-manual');
-  if (btn) { btn.textContent = '🔄 Sincronizando...'; btn.disabled = true; }
-  await sincronizarAhora();
-  const txt = document.getElementById('sync-status-texto');
-  if (txt) txt.textContent = getPending().length === 0 ? '✅ Todo sincronizado' : `⏳ ${getPending().length} registros pendientes`;
-  if (btn) { btn.textContent = '☁️ Sincronizar ahora'; btn.disabled = false; }
-}
-
-function verPendientes() {
-  const pending = getPending();
-  if (!pending.length) { toast('No hay registros pendientes — todo sincronizado ✓','success'); return; }
-  const lista = pending.slice(0,10).map(p=>`• ${p.tabla} — ${p.accion} — ${formatDateTime(p.ts)}`).join('\n');
-  alert(`Registros pendientes de sincronizar (${pending.length}):\n\n${lista}${pending.length>10?'\n...y más':''}` );
-}
-
-function borrarModulo(tabla, descripcion) {
-  confirmarSuperadmin(`Borrar ${descripcion}`, () => {
-    DB.set(tabla, []);
-    logAudit(`Módulo ${tabla} borrado completamente`, 'mantenimiento');
-    toast(`${descripcion} eliminado(s) ✓`, 'success');
-    navigate('mantenimiento');
-  });
-}
-
-function borrarOrdenes() {
-  confirmarSuperadmin('Borrar todas las órdenes (recolecciones, entregas, laboratorio)', () => {
-    DB.set('recolecciones', []);
-    DB.set('entregas', []);
-    DB.set('laboratorio', []);
-    DB.set('visitas', []);
-    DB.set('prestamos', []);
-    logAudit('Todas las órdenes borradas', 'mantenimiento');
-    toast('Todas las órdenes eliminadas ✓', 'success');
-    navigate('mantenimiento');
-  });
-}
-
-function borrarTodo() {
-  confirmarSuperadmin('BORRAR ABSOLUTAMENTE TODOS LOS DATOS DEL SISTEMA', () => {
-    const tablas = ['clientes','extintores','recolecciones','entregas','laboratorio','visitas','prestamos','alertas','auditoria','materiales','prestamos'];
-    tablas.forEach(t => DB.set(t, []));
-    DB.set('seeded', false);
-    setPending([]);
-    logAudit('Sistema borrado completamente — reinicio desde cero', 'mantenimiento');
-    toast('Sistema borrado. Recargando...', 'info');
-    setTimeout(() => location.reload(), 2000);
-  });
-}
-
-// ── MAPA DE MENSAJEROS ───────────────────────────
-function renderMapaMensajeros(el) {
-  const mensajeros = DB.all('usuarios').filter(u => u.rol === 'mensajero' && u.activo);
-  el.innerHTML = `
-  <div class="page-header">
-    <div class="page-header-left">
-      <div class="page-header-title">🗺️ Mapa de Mensajeros en tiempo real</div>
-      <div class="page-header-sub">Ubicación GPS de mensajeros activos</div>
-    </div>
-    <div class="page-header-actions">
-      <button class="btn btn-secondary" onclick="renderMapaMensajeros($('#page-content'))">🔄 Actualizar</button>
-    </div>
-  </div>
-
-  <div style="display:grid;grid-template-columns:280px 1fr;gap:16px;align-items:start;">
-    <!-- Lista mensajeros -->
-    <div class="card">
-      <div class="card-header"><span class="card-title">👤 Mensajeros</span></div>
-      <div class="card-body" style="padding:0;">
-        ${mensajeros.map(u => {
-          const loc = DB.get('ubicacion_' + u.id);
-          const activo = loc && (new Date() - new Date(loc.ts)) < 30*60*1000;
-          return `<div style="padding:14px 16px;border-bottom:1px solid var(--border);cursor:pointer;" onclick="centrarMapa(${loc?loc.lat:0},${loc?loc.lng:0},'${u.nombre}')">
-            <div style="display:flex;align-items:center;gap:10px;">
-              <div style="width:10px;height:10px;border-radius:50%;background:${activo?'var(--green)':'var(--border-2)'};flex-shrink:0;"></div>
-              <div>
-                <div style="font-weight:600;font-size:14px;">${u.nombre}</div>
-                <div style="font-size:11px;color:var(--ink-3);">${activo?`📍 Activo · ${formatDateTime(loc.ts)}`:'Sin ubicación reciente'}</div>
-                ${loc?`<div style="font-size:11px;color:var(--ink-4);">Lat: ${loc.lat.toFixed(4)} · Lng: ${loc.lng.toFixed(4)}</div>`:''}
-              </div>
-            </div>
-            ${loc&&activo?`<div style="display:flex;gap:6px;margin-top:8px;">
-              <button class="btn btn-sm btn-secondary" onclick="abrirWaze(${loc.lat},${loc.lng});event.stopPropagation()">🗺️ Waze</button>
-            </div>`:''}
-          </div>`;
-        }).join('') || '<div style="padding:20px;text-align:center;color:var(--ink-4);">Sin mensajeros registrados</div>'}
-      </div>
-    </div>
-
-    <!-- Mapa OpenStreetMap -->
-    <div class="card">
-      <div class="card-header"><span class="card-title">🗺️ Mapa en tiempo real</span></div>
-      <div style="height:500px;background:#e8e8e8;position:relative;" id="mapa-container">
-        <iframe id="mapa-iframe"
-          src="${generarUrlMapaMensajeros(mensajeros)}"
-          style="width:100%;height:100%;border:none;border-radius:0 0 var(--radius) var(--radius);"
-          loading="lazy">
-        </iframe>
-        <div style="position:absolute;bottom:10px;right:10px;background:rgba(255,255,255,.9);border-radius:var(--radius-sm);padding:6px 10px;font-size:11px;color:var(--ink-3);">
-          OpenStreetMap · Se actualiza al recargar
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="alert alert-blue" style="margin-top:16px;">
-    ℹ️ La ubicación del mensajero se actualiza automáticamente cuando el mensajero tiene la app abierta y el GPS activo en su celular. El punto verde indica actividad en los últimos 30 minutos.
-  </div>`;
-}
-
-function generarUrlMapaMensajeros(mensajeros) {
-  const ubicaciones = mensajeros
-    .map(u => DB.get('ubicacion_' + u.id))
-    .filter(loc => loc && loc.lat && loc.lng);
-
-  if (!ubicaciones.length) {
-    // Centro en Medellín por defecto
-    return 'https://www.openstreetmap.org/export/embed.html?bbox=-75.65%2C6.15%2C-75.50%2C6.35&layer=mapnik';
-  }
-
-  const lat = ubicaciones[0].lat;
-  const lng = ubicaciones[0].lng;
-  const delta = 0.05;
-  return `https://www.openstreetmap.org/export/embed.html?bbox=${lng-delta}%2C${lat-delta}%2C${lng+delta}%2C${lat+delta}&layer=mapnik&marker=${lat}%2C${lng}`;
-}
-
-function centrarMapa(lat, lng, nombre) {
-  if (!lat || !lng) { toast(`Sin ubicación disponible para ${nombre}`,'error'); return; }
-  const delta = 0.02;
-  const iframe = document.getElementById('mapa-iframe');
-  if (iframe) {
-    iframe.src = `https://www.openstreetmap.org/export/embed.html?bbox=${lng-delta}%2C${lat-delta}%2C${lng+delta}%2C${lat+delta}&layer=mapnik&marker=${lat}%2C${lng}`;
-  }
-}
-
-// ── LOGIN / APP SHELL ────────────────────────────
-function showLoginScreen() {
+// ── LOGIN ─────────────────────────────────────────
+function showLoginScreen(){
   document.body.innerHTML=`
   <div id="offline-banner">⚠️ Sin conexión — trabajando en modo local</div>
   <div id="toast-container"></div>
   <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--ink);padding:20px;">
-    <div style="background:var(--white);border-radius:var(--radius-lg);padding:40px 36px;width:100%;max-width:400px;box-shadow:var(--shadow-lg);">
-      <div style="text-align:center;margin-bottom:28px;">
-        <div style="width:64px;height:64px;background:var(--red);border-radius:var(--radius);display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-weight:800;font-size:28px;color:#fff;margin:0 auto 14px;">S</div>
-        <div style="font-family:var(--font-display);font-weight:800;font-size:22px;">Extintores Safety</div>
+    <div style="background:var(--white);border-radius:var(--radius-lg);padding:40px 36px;width:100%;max-width:380px;box-shadow:var(--shadow-lg);">
+      <div style="text-align:center;margin-bottom:32px;">
+        <div style="width:68px;height:68px;background:var(--red);border-radius:var(--radius);display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-weight:800;font-size:32px;color:#fff;margin:0 auto 16px;">S</div>
+        <div style="font-family:var(--font-display);font-weight:800;font-size:22px;color:var(--ink);">Extintores Safety</div>
         <div style="font-size:13px;color:var(--ink-3);margin-top:4px;">Sistema de Gestión CRM</div>
       </div>
-      <div class="form-group"><label class="form-label">Correo</label><input class="form-control" id="login-email" type="email" placeholder="Correo electrónico" autocomplete="email"></div>
-      <div class="form-group"><label class="form-label">Contraseña</label><input class="form-control" id="login-pass" type="password" placeholder="Contraseña"></div>
+      <div class="form-group">
+        <label class="form-label">Correo electrónico</label>
+        <input class="form-control" id="login-email" type="email" placeholder="correo@empresa.com" autocomplete="email">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Contraseña</label>
+        <input class="form-control" id="login-pass" type="password" placeholder="••••••••" autocomplete="current-password">
+      </div>
       <div id="login-error" style="display:none;" class="alert alert-red">Correo o contraseña incorrectos</div>
-      <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:8px;" onclick="doLogin()">Ingresar →</button>
-
+      <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:10px;padding:12px;" onclick="doLogin()">Ingresar →</button>
     </div>
   </div>`;
   document.getElementById('login-pass').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
   updateOnlineStatus();
 }
 
-function doLogin() {
-  const email=$('#login-email').value.trim(), pass=$('#login-pass').value;
+function doLogin(){
+  const email=$('#login-email').value.trim();
+  const pass=$('#login-pass').value;
+  const err=$('#login-error');
+  if(err)err.style.display='none';
   if(login(email,pass)) showApp();
-  else $('#login-error').style.display='flex';
+  else if(err)err.style.display='flex';
 }
 
-function showApp() {
+// ── APP SHELL ─────────────────────────────────────
+function showApp(){
   const u=STATE.currentUser;
   const alertasN=DB.all('alertas').filter(a=>!a.leida).length;
   const pendN=getPending().length;
   document.body.innerHTML=`
-  <div id="offline-banner">⚠️ Sin conexión — los cambios se guardan localmente y sincronizan al reconectar</div>
+  <div id="offline-banner">⚠️ Sin conexión — los cambios se sincronizan al reconectar</div>
   <div id="toast-container"></div>
   <div class="app-shell">
     <aside id="sidebar">
@@ -1258,12 +890,12 @@ function showApp() {
       </div>
       <nav id="sidebar-nav">${buildNav(u.rol)}</nav>
       <div class="sidebar-bottom">
-        <div style="margin-bottom:8px;padding:8px 12px;background:rgba(255,255,255,.06);border-radius:var(--radius-sm);">
-          <div style="font-size:11px;color:rgba(255,255,255,.4);margin-bottom:4px;">Sincronización</div>
-          <div style="font-size:12px;font-weight:500;" id="sync-texto">${pendN===0?'✓ Sincronizado':'⏳ '+pendN+' pendientes'}</div>
-          <button id="btn-sync-manual" class="btn btn-sm" style="width:100%;margin-top:6px;background:rgba(255,255,255,.1);color:#fff;justify-content:center;font-size:11px;" onclick="sincronizarManual()">☁️ Sincronizar <span id="sync-badge" style="background:var(--red);border-radius:99px;padding:1px 5px;font-size:10px;">${pendN>0?pendN:''}</span></button>
+        <div style="padding:8px 12px;background:rgba(255,255,255,.06);border-radius:var(--radius-sm);margin-bottom:8px;">
+          <div style="font-size:11px;color:rgba(255,255,255,.4);margin-bottom:3px;">Sincronización</div>
+          <div style="font-size:12px;font-weight:500;color:var(--green);" id="sync-texto">${pendN===0?'✓ Sincronizado':'⏳ '+pendN+' pendientes'}</div>
+          <button id="btn-sync" class="btn btn-sm" style="width:100%;margin-top:6px;background:rgba(255,255,255,.12);color:#fff;justify-content:center;font-size:11px;" onclick="sincronizar()">☁️ Sincronizar <span id="sync-badge" style="background:var(--red);border-radius:99px;padding:1px 6px;font-size:10px;margin-left:4px;">${pendN>0?pendN:''}</span></button>
         </div>
-        <button class="nav-item" style="width:100%;border-radius:var(--radius-sm);" onclick="logout()"><span class="nav-icon">🚪</span> Cerrar sesión</button>
+        <button class="nav-item" style="width:100%;border-radius:var(--radius-sm);" onclick="logout()"><span class="nav-icon">🚪</span>Cerrar sesión</button>
       </div>
     </aside>
     <main id="main">
@@ -1272,65 +904,159 @@ function showApp() {
         <span id="topbar-title" class="topbar-title">Dashboard</span>
         <div class="topbar-right">
           <div class="status-online"><div class="status-dot" id="status-dot"></div><span id="status-text">En línea</span></div>
-          <button class="btn btn-secondary btn-sm" onclick="navigate('alertas')">🔔 <span class="nav-badge" style="position:static;margin-left:2px;">${alertasN}</span></button>
+          <button class="btn btn-secondary btn-sm" onclick="navigate('alertas')">🔔<span class="nav-badge" style="position:static;margin-left:4px;">${alertasN}</span></button>
         </div>
       </div>
       <div id="page-content" style="padding:28px;"></div>
     </main>
   </div>`;
-
   $$('.nav-item[data-page]').forEach(el=>el.addEventListener('click',()=>navigate(el.dataset.page)));
   updateOnlineStatus();
-
-  // Si es mensajero, iniciar rastreo GPS automáticamente
-  if (u.rol === 'mensajero') {
-    setTimeout(() => {
-      iniciarRastreoMensajero();
-      toast('📍 GPS activado — el coordinador puede ver tu ubicación', 'info');
-    }, 1000);
-  }
-
   navigate('dashboard');
 }
 
-function buildNav(rol) {
-  const all=[
-    {page:'dashboard',        icon:'📊', label:'Dashboard',          roles:['*']},
+function buildNav(rol){
+  const items=[
+    {page:'dashboard',       icon:'📊',label:'Dashboard',        roles:['*']},
     {section:'OPERACIONES'},
-    {page:'recolecciones',    icon:'📦', label:'Recolecciones',      roles:['superadmin','coordinador','mensajero']},
-    {page:'entregas',         icon:'🚚', label:'Entregas',           roles:['superadmin','coordinador','mensajero']},
-    {page:'mensajero',        icon:'📱', label:'Vista Mensajero',    roles:['superadmin','coordinador','mensajero']},
-    {page:'mapa_mensajeros',  icon:'🗺️', label:'Mapa Mensajeros',   roles:['superadmin','coordinador']},
+    {page:'recolecciones',   icon:'📦',label:'Recolecciones',    roles:['superadmin','coordinador','mensajero']},
+    {page:'entregas',        icon:'🚚',label:'Entregas',         roles:['superadmin','coordinador','mensajero']},
+    {page:'mensajero',       icon:'📱',label:'Vista Mensajero',  roles:['superadmin','coordinador','mensajero']},
+    {page:'mapa_mensajeros', icon:'🗺️',label:'Mapa Mensajeros', roles:['superadmin','coordinador']},
     {section:'CLIENTES'},
-    {page:'clientes',         icon:'🏢', label:'Clientes',           roles:['superadmin','coordinador','vendedor']},
-    {page:'extintores',       icon:'🧯', label:'Extintores',         roles:['superadmin','coordinador','laboratorio','vendedor']},
-    {page:'prestamos',        icon:'🔄', label:'Préstamos',          roles:['superadmin','coordinador']},
+    {page:'clientes',        icon:'🏢',label:'Clientes',         roles:['superadmin','coordinador','vendedor']},
+    {page:'extintores',      icon:'🧯',label:'Extintores',       roles:['superadmin','coordinador','laboratorio','vendedor']},
+    {page:'prestamos',       icon:'🔄',label:'Préstamos',        roles:['superadmin','coordinador']},
     {section:'SERVICIOS'},
-    {page:'laboratorio',      icon:'🔬', label:'Laboratorio',        roles:['superadmin','coordinador','laboratorio']},
-    {page:'visitas',          icon:'📋', label:'Inspecciones',       roles:['superadmin','coordinador','vendedor']},
+    {page:'laboratorio',     icon:'🔬',label:'Laboratorio',      roles:['superadmin','coordinador','laboratorio']},
+    {page:'visitas',         icon:'📋',label:'Inspecciones',     roles:['superadmin','coordinador','vendedor']},
     {section:'SISTEMA'},
-    {page:'materiales',       icon:'🗃️', label:'Materiales',        roles:['superadmin','coordinador','laboratorio']},
-    {page:'alertas',          icon:'🔔', label:'Alertas',            roles:['*'], badge:DB.all('alertas').filter(a=>!a.leida).length},
-    {page:'usuarios',         icon:'👥', label:'Usuarios',           roles:['superadmin','coordinador']},
-    {page:'auditoria',        icon:'📝', label:'Auditoría',          roles:['superadmin','coordinador']},
-    {page:'mantenimiento',    icon:'⚙️', label:'Mantenimiento',     roles:['superadmin','coordinador']},
-    {page:'perfil',           icon:'👤', label:'Mi Perfil',          roles:['*']},
+    {page:'materiales',      icon:'🗃️',label:'Materiales',      roles:['superadmin','coordinador','laboratorio']},
+    {page:'alertas',         icon:'🔔',label:'Alertas',          roles:['*'], badge:DB.all('alertas').filter(a=>!a.leida).length},
+    {page:'usuarios',        icon:'👥',label:'Usuarios',         roles:['superadmin','coordinador']},
+    {page:'auditoria',       icon:'📝',label:'Auditoría',        roles:['superadmin','coordinador']},
+    {page:'mantenimiento',   icon:'⚙️',label:'Mantenimiento',   roles:['superadmin','coordinador']},
+    {page:'perfil',          icon:'👤',label:'Mi Perfil',        roles:['*']},
   ];
-  return all.map(item=>{
-    if(item.section) return `<div class="sidebar-section-label">${item.section}</div>`;
-    const ok=item.roles.includes('*')||item.roles.includes(rol); if(!ok) return '';
-    const badge=item.badge?`<span class="nav-badge">${item.badge}</span>`:'';
-    return `<div class="nav-item" data-page="${item.page}"><span class="nav-icon">${item.icon}</span>${item.label}${badge}</div>`;
+  return items.map(i=>{
+    if(i.section)return`<div class="sidebar-section-label">${i.section}</div>`;
+    const ok=i.roles.includes('*')||i.roles.includes(rol); if(!ok)return'';
+    const badge=i.badge?`<span class="nav-badge">${i.badge}</span>`:'';
+    return`<div class="nav-item" data-page="${i.page}"><span class="nav-icon">${i.icon}</span>${i.label}${badge}</div>`;
   }).join('');
 }
 
+// ── MANTENIMIENTO ─────────────────────────────────
+function renderMantenimiento(el){
+  el.innerHTML=`
+  <div class="page-header">
+    <div class="page-header-left"><div class="page-header-title">⚙️ Mantenimiento</div><div class="page-header-sub">Herramientas de administración</div></div>
+  </div>
+  <div class="card" style="margin-bottom:20px;">
+    <div class="card-header"><span class="card-title">☁️ Sincronización con Google Sheets</span></div>
+    <div class="card-body">
+      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+        <div>
+          <div style="font-size:14px;font-weight:500;" id="sync-estado">${getPending().length===0?'✅ Todo sincronizado':'⏳ '+getPending().length+' registros pendientes'}</div>
+          <div style="font-size:12px;color:var(--ink-3);">Google Sheets conectado</div>
+        </div>
+        <button class="btn btn-primary" onclick="sincronizarDesdeMantenimiento()">☁️ Sincronizar ahora</button>
+        <button class="btn btn-secondary" onclick="verPendientes()">👁 Ver pendientes (${getPending().length})</button>
+      </div>
+    </div>
+  </div>
+  <div class="card" style="border-color:var(--red-m);">
+    <div class="card-header" style="background:var(--red-l);"><span class="card-title" style="color:var(--red-d);">🗑️ Zona de peligro</span></div>
+    <div class="card-body">
+      <div class="alert alert-red">⚠️ Estas acciones son irreversibles y requieren contraseña de Superadmin.</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px;">
+        <div style="border:1.5px solid var(--border);border-radius:var(--radius);padding:14px;">
+          <div style="font-weight:600;margin-bottom:4px;">🧯 Borrar extintores</div>
+          <div style="font-size:12px;color:var(--ink-3);margin-bottom:10px;">Elimina todos los extintores</div>
+          <button class="btn btn-sm btn-outline" style="color:var(--red);border-color:var(--red);" onclick="borrarTabla('extintores','todos los extintores')">Borrar</button>
+        </div>
+        <div style="border:1.5px solid var(--border);border-radius:var(--radius);padding:14px;">
+          <div style="font-weight:600;margin-bottom:4px;">🏢 Borrar clientes</div>
+          <div style="font-size:12px;color:var(--ink-3);margin-bottom:10px;">Elimina todos los clientes</div>
+          <button class="btn btn-sm btn-outline" style="color:var(--red);border-color:var(--red);" onclick="borrarTabla('clientes','todos los clientes')">Borrar</button>
+        </div>
+        <div style="border:1.5px solid var(--border);border-radius:var(--radius);padding:14px;">
+          <div style="font-weight:600;margin-bottom:4px;">📦 Borrar órdenes</div>
+          <div style="font-size:12px;color:var(--ink-3);margin-bottom:10px;">Recolecciones, entregas, laboratorio</div>
+          <button class="btn btn-sm btn-outline" style="color:var(--red);border-color:var(--red);" onclick="borrarOrdenes()">Borrar</button>
+        </div>
+        <div style="border:1.5px solid var(--border);border-radius:var(--radius);padding:14px;">
+          <div style="font-weight:600;margin-bottom:4px;">📝 Borrar auditoría</div>
+          <div style="font-size:12px;color:var(--ink-3);margin-bottom:10px;">Limpia el historial</div>
+          <button class="btn btn-sm btn-outline" style="color:var(--red);border-color:var(--red);" onclick="borrarTabla('auditoria','el historial')">Borrar</button>
+        </div>
+      </div>
+      <div style="border:2px solid var(--red);border-radius:var(--radius);padding:16px;margin-top:16px;background:var(--red-l);">
+        <div style="font-weight:700;color:var(--red-d);margin-bottom:6px;">💥 Borrar TODO y empezar desde cero</div>
+        <div style="font-size:12px;color:var(--red-d);margin-bottom:12px;">Elimina todos los datos. Los usuarios se conservan.</div>
+        <button class="btn btn-primary" style="background:var(--red);" onclick="borrarTodo()">💥 Borrar todo</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function sincronizarDesdeMantenimiento(){
+  await sincronizar();
+  const el=document.getElementById('sync-estado');
+  if(el)el.textContent=getPending().length===0?'✅ Todo sincronizado':'⏳ '+getPending().length+' registros pendientes';
+}
+function verPendientes(){ const p=getPending(); if(!p.length){toast('Todo sincronizado ✓','success');return;} alert(`Pendientes (${p.length}):\n`+p.slice(0,8).map(x=>`• ${x.tabla} — ${x.accion}`).join('\n')); }
+function borrarTabla(tabla,desc){ confirmarSuperadmin(`Borrar ${desc}`,()=>{ DB.set(tabla,[]); toast(`${desc} eliminado ✓`,'success'); logAudit(`Borrado: ${tabla}`,'mantenimiento'); navigate('mantenimiento'); }); }
+function borrarOrdenes(){ confirmarSuperadmin('Borrar todas las órdenes',()=>{ ['recolecciones','entregas','laboratorio','visitas','prestamos'].forEach(t=>DB.set(t,[])); toast('Órdenes eliminadas ✓','success'); navigate('mantenimiento'); }); }
+function borrarTodo(){ confirmarSuperadmin('BORRAR ABSOLUTAMENTE TODOS LOS DATOS',()=>{ ['clientes','extintores','recolecciones','entregas','laboratorio','visitas','prestamos','alertas','auditoria','materiales'].forEach(t=>DB.set(t,[])); setPending([]); toast('Sistema borrado. Recargando...','info'); setTimeout(()=>location.reload(),1500); }); }
+
+// ── MAPA MENSAJEROS ───────────────────────────────
+function renderMapaMensajeros(el){
+  const mensajeros=DB.all('usuarios').filter(u=>u.rol==='mensajero'&&u.activo);
+  el.innerHTML=`
+  <div class="page-header">
+    <div class="page-header-left"><div class="page-header-title">🗺️ Mapa de Mensajeros</div><div class="page-header-sub">Ubicación en tiempo real</div></div>
+    <div class="page-header-actions"><button class="btn btn-secondary" onclick="renderMapaMensajeros($('#page-content'))">🔄 Actualizar</button></div>
+  </div>
+  <div style="display:grid;grid-template-columns:260px 1fr;gap:16px;">
+    <div class="card">
+      <div class="card-header"><span class="card-title">👤 Mensajeros</span></div>
+      <div style="padding:0;">
+        ${mensajeros.length?mensajeros.map(u=>{
+          const loc=DB.get('ubicacion_'+u.id);
+          const activo=loc&&(new Date()-new Date(loc.ts))<30*60*1000;
+          return`<div style="padding:14px 16px;border-bottom:1px solid var(--border);">
+            <div style="display:flex;align-items:center;gap:10px;">
+              <div style="width:10px;height:10px;border-radius:50%;background:${activo?'var(--green)':'var(--border-2)'};flex-shrink:0;"></div>
+              <div>
+                <div style="font-weight:600;">${u.nombre}</div>
+                <div style="font-size:11px;color:var(--ink-3);">${activo?'Activo · '+formatDateTime(loc.ts):'Sin ubicación'}</div>
+              </div>
+            </div>
+            ${loc&&activo?`<button class="btn btn-sm btn-secondary" style="margin-top:8px;" onclick="abrirWaze(${loc.lat},${loc.lng})">🗺️ Waze</button>`:''}
+          </div>`;
+        }).join(''):'<div style="padding:20px;text-align:center;color:var(--ink-4);">Sin mensajeros registrados</div>'}
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header"><span class="card-title">🗺️ Mapa en tiempo real</span></div>
+      <iframe src="https://www.openstreetmap.org/export/embed.html?bbox=-75.65%2C6.15%2C-75.50%2C6.35&layer=mapnik" style="width:100%;height:480px;border:none;" loading="lazy"></iframe>
+    </div>
+  </div>`;
+}
+
+function abrirWaze(lat,lng){ if(!lat||!lng){toast('Sin coordenadas','error');return;} window.open(`https://waze.com/ul?ll=${lat},${lng}&navigate=yes`,'_blank'); }
+
 // ── INIT ──────────────────────────────────────────
 document.addEventListener('DOMContentLoaded',()=>{
-  seedDemoData();
-  window.addEventListener('online',  updateOnlineStatus);
-  window.addEventListener('offline', updateOnlineStatus);
+  // Limpiar localStorage viejo (con prefijo 'safety_')
+  Object.keys(localStorage).forEach(k=>{ if(k.startsWith('safety_')) localStorage.removeItem(k); });
+
+  initDB();
+  window.addEventListener('online', updateOnlineStatus);
+  window.addEventListener('offline',updateOnlineStatus);
   const saved=DB.get('sessionUser');
-  if(saved){ STATE.currentUser=saved; showApp(); }
+  if(saved&&saved.id){ STATE.currentUser=saved; showApp(); }
   else showLoginScreen();
 });
 </script>
@@ -1352,11 +1078,11 @@ function showLoginScreen() {
       </div>
       <div class="form-group">
         <label class="form-label">Correo electrónico</label>
-        <input class="form-control" id="login-email" type="email" placeholder="Correo electrónico" autocomplete="email">
+        <input class="form-control" id="login-email" type="email" placeholder="Correo electrónico" >
       </div>
       <div class="form-group">
         <label class="form-label">Contraseña</label>
-        <input class="form-control" id="login-pass" type="password" placeholder="••••••••">
+        <input class="form-control" id="login-pass" type="password" placeholder="••••••••" >
       </div>
       <div id="login-error" style="display:none;" class="alert alert-red">Correo o contraseña incorrectos</div>
       <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:8px;" onclick="doLogin()">Ingresar →</button>
