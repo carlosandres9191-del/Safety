@@ -917,30 +917,45 @@ function showLoginScreen(){
 }
 
 async function doLogin(){
-  const email=$('#login-email').value.trim(), pass=$('#login-pass').value;
-  const err=$('#login-error'); if(err)err.style.display='none';
-  const btn=$('button.btn-primary');
-  if(btn){btn.textContent='Verificando...';btn.disabled=true;}
+  const email = $('#login-email').value.trim();
+  const pass  = $('#login-pass').value;
+  const err   = $('#login-error');
+  const btn   = $('#page-content') ? null : document.querySelector('.btn-primary');
+  if(err) err.style.display='none';
 
-  // Intentar login local primero
-  if(login(email,pass)){ showApp(); return; }
-
-  // Si falla, cargar usuarios desde Supabase y reintentar
+  // Buscar usuario directo en Supabase
   try {
-    const r = await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/usuarios?select=*`, {
-      headers:{ 'apikey':CONFIG.SUPABASE_KEY, 'Authorization':'Bearer '+CONFIG.SUPABASE_KEY }
+    const url = `${CONFIG.SUPABASE_URL}/rest/v1/usuarios?email=eq.${encodeURIComponent(email)}&select=*`;
+    const r = await fetch(url, {
+      headers:{
+        'apikey': CONFIG.SUPABASE_KEY,
+        'Authorization': 'Bearer ' + CONFIG.SUPABASE_KEY
+      }
     });
     if(r.ok){
-      const usuarios = await r.json();
-      if(usuarios&&usuarios.length>0){
-        DB.set('usuarios', usuarios);
-        if(login(email,pass)){ showApp(); return; }
+      const lista = await r.json();
+      if(lista && lista.length > 0){
+        const user = lista[0];
+        // Comparar contraseña (trim para evitar espacios)
+        if(user.password.trim() === pass.trim() && user.activo){
+          // Guardar todos los usuarios localmente
+          const todosURL = `${CONFIG.SUPABASE_URL}/rest/v1/usuarios?select=*`;
+          const todosR = await fetch(todosURL, {headers:{'apikey':CONFIG.SUPABASE_KEY,'Authorization':'Bearer '+CONFIG.SUPABASE_KEY}});
+          if(todosR.ok){ const todos=await todosR.json(); DB.set('usuarios',todos); }
+          STATE.currentUser = user;
+          DB.set('sessionUser', user);
+          logAudit('Login','auth');
+          showApp();
+          return;
+        }
       }
     }
-  } catch(e){ console.log('Error cargando usuarios:', e); }
+  } catch(e){ console.log('Error Supabase login:', e); }
 
-  if(btn){btn.textContent='Ingresar →';btn.disabled=false;}
-  if(err)err.style.display='flex';
+  // Fallback: buscar en local
+  if(login(email, pass)){ showApp(); return; }
+
+  if(err) err.style.display='flex';
 }
 
 function showApp(){
