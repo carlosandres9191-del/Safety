@@ -1083,10 +1083,11 @@ function showLoginScreen() {
       <div class="form-group"><label class="form-label">Correo electrónico</label><input class="form-control" id="login-email" type="email" placeholder="correo@empresa.com" autocomplete="email"></div>
       <div class="form-group"><label class="form-label">Contraseña</label><input class="form-control" id="login-pass" type="password" placeholder="••••••••" autocomplete="current-password"></div>
       <div id="login-error" style="display:none;" class="alert alert-red">Correo o contraseña incorrectos</div>
-      <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:10px;padding:12px;" onclick="doLogin()">Ingresar →</button>
+      <button id="btn-login" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:10px;padding:12px;">Ingresar →</button>
     </div>
   </div>`;
-  $('#login-pass').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
+  document.getElementById('login-pass').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
+  document.getElementById('btn-login').addEventListener('click', doLogin);
   updateOnlineStatus();
 }
 
@@ -1759,7 +1760,7 @@ function guardarCliente() {
     DB.pushSync('clientes', data);
     toast('Cliente creado ✓','success');
   }
-  queueForSync({ tabla:'clientes', data });
+  // sync: {tabla:'clientes', data });
   closeModal('modal-cliente');
   logAudit(`Cliente ${data.empresa} ${editId?'actualizado':'creado'}`, 'clientes');
   navigate('clientes');
@@ -2210,7 +2211,7 @@ function guardarExtintor() {
     DB.pushSync('extintores', data);
     toast('Extintor registrado ✓','success');
   }
-  queueForSync({ tabla:'extintores', data });
+  // sync: {tabla:'extintores', data });
   closeModal('modal-extintor');
   logAudit(`Extintor ${serial} ${editId?'actualizado':'creado'}`, 'extintores');
   navigate('extintores');
@@ -2428,7 +2429,7 @@ function guardarRec() {
   DB.pushSync('recolecciones', data);
   // Crear alerta para mensajero
   DB.pushSync('alertas', { tipo:'orden', mensaje:`Nueva recolección asignada — ${clienteNombre(clienteId)}`, usuarioDestino:'mensajero', leida:false });
-  queueForSync({ tabla:'recolecciones', data });
+  // sync: {tabla:'recolecciones', data });
   toast('Orden de recolección creada ✓','success');
   closeModal('modal-rec');
   logAudit(`Orden de recolección creada — ${clienteNombre(clienteId)}`, 'recolecciones');
@@ -3588,7 +3589,7 @@ function guardarUsuario() {
     toast(`Usuario ${nombre} creado ✓`, 'success');
   }
 
-  queueForSync({ tabla:'usuarios', data });
+  // sync: {tabla:'usuarios', data });
   closeModal('modal-usuario');
   navigate('usuarios');
 }
@@ -3699,7 +3700,7 @@ function guardarPerfil() {
   DB.updateSync('usuarios', STATE.currentUser.id, data);
   STATE.currentUser = { ...STATE.currentUser, ...data };
   DB.set('sessionUser', STATE.currentUser);
-  queueForSync({ tabla:'usuarios', data: { id: STATE.currentUser.id, ...data } });
+  // sync: {tabla:'usuarios', data: { id: STATE.currentUser.id, ...data } });
   logAudit('Perfil actualizado', 'perfil');
   toast('Perfil actualizado correctamente ✓', 'success');
 
