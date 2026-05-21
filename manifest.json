@@ -1,0 +1,22 @@
+{
+  "name": "Safety CRM — Extintores",
+  "short_name": "Safety CRM",
+  "description": "Sistema de gestión CRM para Extintores Safety S.A.S",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#111111",
+  "theme_color": "#C8281E",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "https://via.placeholder.com/192x192/C8281E/FFFFFF?text=S",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://via.placeholder.com/512x512/C8281E/FFFFFF?text=S",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

@@ -1,5 +1,3 @@
-
--- Ejecuta esto en Supabase > SQL Editor
 create table if not exists clientes (id text primary key, empresa text, nit text, contacto text, telefono text, email text, direccion text, ciudad text, lat float, lng float, activo boolean default true, created_at timestamptz default now(), updated_at timestamptz);
 create table if not exists extintores (id text primary key, "clienteId" text, serial text, ubicacion text, tipo text, capacidad text, libras float, mmt int, "fechaVencimiento" text, estado text default 'activo', created_at timestamptz default now(), updated_at timestamptz);
 create table if not exists recolecciones (id text primary key, "clienteId" text, "mensajeroId" text, extintores jsonb, estado text, prioridad text, "fechaProgramada" text, observaciones text, created_at timestamptz default now(), updated_at timestamptz);
@@ -12,8 +10,6 @@ create table if not exists materiales (id text primary key, nombre text, categor
 create table if not exists auditoria (id text primary key, "usuarioId" text, accion text, modulo text, created_at timestamptz default now());
 create table if not exists usuarios (id text primary key, nombre text, email text, password text, rol text, activo boolean default true, created_at timestamptz default now(), updated_at timestamptz);
 create table if not exists ubicaciones (id text primary key, "usuarioId" text, lat float, lng float, ts timestamptz, nombre text);
-
--- Habilitar acceso publico (Row Level Security desactivado para desarrollo)
 alter table clientes enable row level security;
 alter table extintores enable row level security;
 alter table recolecciones enable row level security;
@@ -26,7 +22,6 @@ alter table materiales enable row level security;
 alter table auditoria enable row level security;
 alter table usuarios enable row level security;
 alter table ubicaciones enable row level security;
-
 create policy "acceso_publico" on clientes for all using (true) with check (true);
 create policy "acceso_publico" on extintores for all using (true) with check (true);
 create policy "acceso_publico" on recolecciones for all using (true) with check (true);
