@@ -942,80 +942,64 @@ function confirmarSuperadmin(mensaje,callback) {
 
 // ── AUTH ──────────────────────────────────────────
 async function doLogin() {
-  const email = ($('#login-email').value||'').trim();
-  const pass  = ($('#login-pass').value||'').trim();
-  const err   = $('#login-error');
-  if(err) err.style.display='none';
+  const email = (document.getElementById('login-email').value||'').trim().toLowerCase();
+  const pass  = (document.getElementById('login-pass').value||'').trim();
+  const errEl = document.getElementById('login-error');
+  const btn   = document.getElementById('btn-login');
 
-  try {
-    // Traer TODOS los usuarios de Supabase sin filtro
-    const resp = await fetch(
-      `${CONFIG.SUPABASE_URL}/rest/v1/usuarios?select=*`,
-      { headers:{ 'apikey':CONFIG.SUPABASE_KEY, 'Authorization':'Bearer '+CONFIG.SUPABASE_KEY } }
-    );
-
-    if (resp.ok) {
-      const lista = await resp.json();
-      // Guardar en caché
-      if(Array.isArray(lista) && lista.length > 0) {
-        CACHE.set('usuarios', lista);
-      }
-
-      // Buscar usuario comparando email y contraseña
-      // Acepta cualquier nombre de campo de contraseña
-      const u = (Array.isArray(lista)?lista:[]).find(u => {
-        if(!u.email) return false;
-        if(u.email.trim().toLowerCase() !== email.toLowerCase()) return false;
-        // Buscar en todos los campos posibles de contraseña
-        const campos = Object.keys(u);
-        for(const campo of campos) {
-          if(campo.toLowerCase().includes('pass') || campo.toLowerCase().includes('contra') || campo.toLowerCase().includes('clave')) {
-            if(String(u[campo]||'').trim() === pass) return true;
-          }
-        }
-        return false;
-      });
-
-      if(u) {
-        const activo = u.activo===true || u.activo==='true' || u.activo===1 || u.activo==='1';
-        if(!activo) { if(err){ err.textContent='Usuario inactivo'; err.style.display='flex'; } return; }
-        // Normalizar
-        u.password = pass;
-        STATE.currentUser = u;
-        CACHE.set('sessionUser', u);
-        logAudit('Login','auth');
-        await cargarTodo();
-        showApp();
-        return;
-      }
-    }
-  } catch(e) { console.warn('Login error:', e.message); }
-
-  // Fallback: buscar en caché local
-  const todos = CACHE.all('usuarios');
-  const local = todos.find(u => {
-    if(!u.email||u.email.trim().toLowerCase()!==email.toLowerCase()) return false;
-    const campos=Object.keys(u);
-    for(const c of campos){
-      if(c.toLowerCase().includes('pass')||c.toLowerCase().includes('contra')||c.toLowerCase().includes('clave')){
-        if(String(u[c]||'').trim()===pass) return true;
-      }
-    }
-    return false;
-  });
-
-  if(local && (local.activo===true||local.activo==='true')){
-    local.password=pass;
-    STATE.currentUser=local;
-    CACHE.set('sessionUser',local);
-    logAudit('Login local','auth');
-    await cargarTodo();
-    showApp();
+  if(errEl) errEl.style.display='none';
+  if(!email || !pass) {
+    if(errEl){ errEl.textContent='Ingresa correo y contraseña'; errEl.style.display='block'; }
     return;
   }
 
-  if(err){ err.textContent='Correo o contraseña incorrectos'; err.style.display='flex'; }
+  if(btn){ btn.textContent='Verificando...'; btn.disabled=true; }
+
+  try {
+    // Buscar directamente en Supabase
+    const resp = await fetch(
+      'https://ilivtsacimtffnaxgtwx.supabase.co/rest/v1/usuarios?select=*',
+      {
+        headers: {
+          'apikey': 'sb_publishable_RBFJ8i1X9wO2F402TSUFiw_bUH8Ui0T',
+          'Authorization': 'Bearer sb_publishable_RBFJ8i1X9wO2F402TSUFiw_bUH8Ui0T'
+        }
+      }
+    );
+
+    if(resp.ok) {
+      const lista = await resp.json();
+      // Guardar en cache
+      CACHE.set('usuarios', lista);
+
+      // Buscar usuario
+      const user = lista.find(u => {
+        const emailOk = (u.email||'').trim().toLowerCase() === email;
+        const passOk  = String(u.password||u.contrasena||'').trim() === pass;
+        const activo  = u.activo === true || u.activo === 'true';
+        return emailOk && passOk && activo;
+      });
+
+      if(user) {
+        APP.user = user;
+        CACHE.set('session', user);
+        await cargarTodo();
+        showApp();
+        return;
+      } else {
+        if(errEl){ errEl.textContent='Correo o contraseña incorrectos'; errEl.style.display='block'; }
+      }
+    } else {
+      if(errEl){ errEl.textContent='Error de conexión. Intenta de nuevo.'; errEl.style.display='block'; }
+    }
+  } catch(e) {
+    console.error('Login error:', e);
+    if(errEl){ errEl.textContent='Error de red. Verifica tu conexión.'; errEl.style.display='block'; }
+  }
+
+  if(btn){ btn.textContent='Ingresar →'; btn.disabled=false; }
 }
+
 
 function logout() {
   detenerRastreo();
