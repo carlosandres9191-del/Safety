@@ -724,6 +724,7 @@ function pgMens(c) {
     +(rc.length?rc.map(function(r){var cl=DB.find('clientes',r.clienteId)||{}; return'<div style="background:#fff;border-radius:12px;border:1.5px solid #e5e5e5;padding:15px;margin-bottom:10px;"><div style="display:flex;justify-content:space-between;margin-bottom:8px;">'+pB(r.prioridad)+oB(r.estado)+'</div><div style="font-weight:700;font-size:16px;margin-bottom:3px;">📦 '+(cl.empresa||'Cliente')+'</div><div style="font-size:12px;color:#888;margin-bottom:3px;">📍 '+(cl.direccion||'')+'</div><div style="font-size:12px;color:#888;margin-bottom:11px;">👤 '+(cl.contacto||'—')+' · 📞 '+(cl.telefono||'—')+'</div><div style="display:flex;gap:7px;flex-wrap:wrap;">'+(cl.telefono?'<a href="tel:'+cl.telefono+'" class="btn btn-secondary btn-sm">📞 Llamar</a>':'')+(cl.lat&&cl.lng?'<button class="btn btn-primary btn-sm" onclick="window.open('https://waze.com/ul?ll='+cl.lat+','+cl.lng+'&navigate=yes','_blank')">🗺️ Waze</button>':'')+'<button class="btn btn-sm btn-green" onclick="confRec(''+r.id+'')">✅ Confirmar</button></div></div>';}).join(''):'<div class="empty"><div class="empty-icon">📦</div><div class="empty-title">Sin órdenes</div></div>')
     +'</div>';
 }
+function goTo_alertas(){goTo("alertas");}
 function confRec(id) { DB.save('recolecciones',Object.assign({},DB.find('recolecciones',id),{estado:'completada'})); toast('Confirmado ✓','success'); goTo('mensajero'); }
 
 // MAPA
