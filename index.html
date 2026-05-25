@@ -460,40 +460,49 @@ function onlineCheck(){
 }
 
 function startGPS(){
-  if(!navigator.geolocation){ toast('GPS no disponible en este dispositivo','error'); return; }
-  let lastSave = 0;
-  APP.gps = navigator.geolocation.watchPosition(async pos=>{
+  if(!navigator.geolocation){ toast('GPS no disponible','error'); return; }
+  
+  function enviarUbicacion(pos){
     const loc = {
       id: APP.user.id,
       usuarioId: APP.user.id,
       nombre: APP.user.nombre,
       lat: pos.coords.latitude,
       lng: pos.coords.longitude,
+      precision: pos.coords.accuracy,
       ts: ts(),
       activo: true
     };
-    // Guardar en cache local
+    // Guardar en cache
     C.set('loc_'+APP.user.id, loc);
-    // Broadcast en tiempo real via Supabase Realtime
-    if(APP.realtimeChannel){
-      APP.realtimeChannel.send({
-        type: 'broadcast',
-        event: 'gps',
-        payload: loc
-      });
-    }
-    // Guardar en DB cada 30 segundos para persistencia
-    const ahora = Date.now();
-    if(ahora - lastSave > 30000){
-      lastSave = ahora;
-      sbSave('ubicaciones', loc);
-    }
-  }, e=>{ console.warn('GPS error:',e.message); toast('Error GPS: '+e.message,'error'); },
-  {enableHighAccuracy:true, maximumAge:5000, timeout:10000});
-  // Conectar canal Realtime
-  iniciarRealtime();
-  toast('📍 GPS activado — transmitiendo en tiempo real','success');
+    // Guardar directo en Supabase REST (sin WebSocket)
+    fetch(SBURL+'/rest/v1/ubicaciones', {
+      method: 'POST',
+      headers: {...SBH, 'Prefer':'resolution=merge-duplicates'},
+      body: JSON.stringify(loc)
+    }).catch(e=>console.warn('GPS save error:',e.message));
+    // Actualizar indicador en pantalla
+    const ind = ge('gps-indicador');
+    if(ind) ind.textContent = '📍 GPS activo — '+Number(loc.lat).toFixed(5)+', '+Number(loc.lng).toFixed(5);
+  }
+
+  function errorGPS(err){
+    console.warn('GPS error:', err.code, err.message);
+    const msgs = {1:'Permiso denegado',2:'Sin señal GPS',3:'Tiempo agotado'};
+    toast('GPS: '+(msgs[err.code]||err.message),'error');
+  }
+
+  APP.gps = navigator.geolocation.watchPosition(
+    enviarUbicacion,
+    errorGPS,
+    {enableHighAccuracy:true, maximumAge:8000, timeout:12000}
+  );
+  toast('📍 GPS activado y transmitiendo','success');
 }
+
+function suscribirMapa(){}
+function iniciarRealtime(){}
+function actualizarMarcador(){}
 
 function iniciarRealtime(){
   if(APP.realtimeChannel) return;
@@ -754,7 +763,7 @@ function pgRec(c){
   c.innerHTML=`<div style="padding:28px">
   <div class="ph"><div><div class="ph-t">📦 Recolecciones</div><div class="ph-s">${rc.filter(r=>r.estado==='pendiente').length} pendientes de ${rc.length}</div></div><div class="ph-a"><select class="fc" style="width:auto" onchange="fAttr('t-rc','data-est',this.value)"><option value="">Todos</option><option value="pendiente">Pendiente</option><option value="en_ruta">En ruta</option><option value="completada">Completada</option></select>${isC()?`<button class="btn btn-pr" onclick="mRec()">+ Nueva orden</button>`:''}</div></div>
   <div class="card"><div class="tw"><table id="t-rc"><thead><tr><th>Cliente</th><th>Mensajero</th><th>Estado</th><th>Prioridad</th><th>Fecha</th><th>Acciones</th></tr></thead><tbody>
-  ${rc.map(r=>{const m=DB.find('usuarios',r.mensajeroId);return`<tr data-est="${r.estado}"><td><b>${cN(r.clienteId)}</b></td><td>${m?m.nombre:'—'}</td><td>${oB(r.estado)}</td><td>${pB(r.prioridad)}</td><td>${fD(r.fechaProgramada)}</td><td><div style="display:flex;gap:4px">${isC()?`<button class="btn btn-ou btn-sm" onclick="chgRec('${r.id}')">🔄</button><button class="btn btn-da btn-sm" onclick="delRec('${r.id}')">🗑️</button>`:''}</div></td></tr>`}).join('')||'<tr><td colspan="6"><div class="empty"><div class="empty-ic">📦</div><div class="empty-t">Sin recolecciones</div></div></td></tr>'}
+  ${rc.map(r=>{const m=DB.find('usuarios',r.mensajeroId);return`<tr data-est="${r.estado}"><td><b>${cN(r.clienteId)}</b></td><td>${m?m.nombre:'<span style="color:var(--red);font-size:12px;font-weight:600">Sin asignar</span>'}</td><td>${oB(r.estado)}</td><td>${pB(r.prioridad)}</td><td>${fD(r.fechaProgramada)}</td><td><div style="display:flex;gap:4px">${isC()?`<button class="btn btn-se btn-sm" onclick="asignarMens('${r.id}','rec')">👤 Asignar</button><button class="btn btn-ou btn-sm" onclick="chgRec('${r.id}')">🔄</button><button class="btn btn-da btn-sm" onclick="delRec('${r.id}')">🗑️</button>`:''}</div></td></tr>`}).join('')||'<tr><td colspan="6"><div class="empty"><div class="empty-ic">📦</div><div class="empty-t">Sin recolecciones</div></div></td></tr>'}
   </tbody></table></div></div>
   <div class="ov" id="m-rec"><div class="modal"><div class="mh"><span class="mt">Nueva Recolección</span><button class="mc btn" onclick="closeM('m-rec')">✕</button></div><div class="mb"><div class="fg"><label>Cliente <span class="req">*</span></label><select class="fc" id="rec-cl" onchange="ldExtR(this.value)"><option value="">Seleccionar...</option>${cl.map(c2=>`<option value="${c2.id}">${c2.empresa}</option>`).join('')}</select></div><div class="fg"><label>Extintores</label><div id="rec-exts" style="border:1.5px solid var(--border);border-radius:10px;padding:10px;max-height:130px;overflow-y:auto;font-size:13px;color:var(--ink3)">Selecciona un cliente</div></div><div class="fg2"><div class="fg"><label>Mensajero</label><select class="fc" id="rec-men">${mens.map(u=>`<option value="${u.id}">${u.nombre}</option>`).join('')}</select></div><div class="fg"><label>Prioridad</label><select class="fc" id="rec-pri"><option value="alta">🔴 Alta</option><option value="media" selected>🟡 Media</option><option value="baja">🟢 Baja</option></select></div><div class="fg"><label>Fecha</label><input class="fc" id="rec-fe" type="date"></div></div><div class="fg"><label>Observaciones</label><textarea class="fc" id="rec-obs" rows="2"></textarea></div></div><div class="mf"><button class="btn btn-se" onclick="closeM('m-rec')">Cancelar</button><button class="btn btn-pr" onclick="saveRec()">Crear orden</button></div></div></div>
   </div>`;
@@ -763,6 +772,52 @@ function ldExtR(cid){ const ex=DB.all('extintores').filter(e=>e.clienteId===cid)
 function mRec(){ openM('m-rec') }
 function saveRec(){ const cid=ge('rec-cl').value; if(!cid){toast('Selecciona cliente','error');return;} const ex=qsa('input[name="rex"]:checked').map(cb=>cb.value); DB.save('recolecciones',{clienteId:cid,mensajeroId:ge('rec-men').value,extintores:ex,prioridad:ge('rec-pri').value,fechaProgramada:ge('rec-fe').value,observaciones:ge('rec-obs').value.trim(),estado:'pendiente'}); toast('Orden creada ✓','success'); closeM('m-rec'); goTo('recolecciones'); }
 function chgRec(id){ const r=DB.find('recolecciones',id); if(!r)return; const es=['pendiente','en_ruta','completada','cancelada']; DB.save('recolecciones',{...r,estado:es[(es.indexOf(r.estado)+1)%es.length]}); toast('Estado actualizado','success'); goTo('recolecciones'); }
+
+function asignarMens(ordenId, tipo){
+  const orden = tipo==='rec' ? DB.find('recolecciones',ordenId) : DB.find('entregas',ordenId);
+  if(!orden) return;
+  const mensajeros = DB.all('usuarios').filter(u=>u.activo&&(u.rol==='mensajero'||u.rol==='coordinador'));
+  const actual = DB.find('usuarios', orden.mensajeroId);
+  
+  const ov = document.createElement('div'); ov.className='ov open'; ov.style.zIndex='9999';
+  ov.innerHTML=`<div class="modal sm">
+    <div class="mh"><span class="mt">👤 Asignar Mensajero</span><button class="mc btn" onclick="this.closest('.ov').remove()">✕</button></div>
+    <div class="mb">
+      <div style="margin-bottom:14px;padding:10px 14px;background:var(--surface);border-radius:10px;font-size:13px">
+        <div style="font-size:10px;color:var(--ink3);font-weight:700;text-transform:uppercase;margin-bottom:3px">Orden</div>
+        <div style="font-weight:600">${cN(orden.clienteId)}</div>
+        ${actual?`<div style="font-size:12px;color:var(--ink3);margin-top:2px">Asignado actualmente: <b>${actual.nombre}</b></div>`:'<div style="font-size:12px;color:var(--red)">Sin mensajero asignado</div>'}
+      </div>
+      <div class="fg"><label>Seleccionar mensajero <span class="req">*</span></label>
+        <select class="fc" id="sel-mens-modal">
+          <option value="">-- Seleccionar --</option>
+          ${mensajeros.map(u=>`<option value="${u.id}" ${orden.mensajeroId===u.id?'selected':''}>${u.nombre} (${rL(u.rol)})</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="mf">
+      <button class="btn btn-se" onclick="this.closest('.ov').remove()">Cancelar</button>
+      <button class="btn btn-pr" onclick="confirmarAsignacion('${ordenId}','${tipo}',this)">✅ Asignar</button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+}
+
+function confirmarAsignacion(ordenId, tipo, btn){
+  const sel = ge('sel-mens-modal'); if(!sel||!sel.value){toast('Selecciona un mensajero','error');return;}
+  const mensajeroId = sel.value;
+  const mens = DB.find('usuarios',mensajeroId);
+  if(tipo==='rec'){
+    const r = DB.find('recolecciones',ordenId);
+    DB.save('recolecciones',{...r,mensajeroId,estado:'pendiente'});
+  } else {
+    const e = DB.find('entregas',ordenId);
+    DB.save('entregas',{...e,mensajeroId});
+  }
+  btn.closest('.ov').remove();
+  toast(`Asignado a ${mens?mens.nombre:'mensajero'} ✓`,'success');
+  goTo(tipo==='rec'?'recolecciones':'entregas');
+}
 function delRec(id){ confirmSA('Eliminar recolección',()=>{DB.del('recolecciones',id);toast('Eliminada','success');goTo('recolecciones')}) }
 
 // ── ENTREGAS ─────────────────────────────────────────────────────────────
@@ -771,7 +826,7 @@ function pgEnt(c){
   c.innerHTML=`<div style="padding:28px">
   <div class="ph"><div><div class="ph-t">🚚 Entregas</div><div class="ph-s">${en.filter(e=>e.estado==='pendiente').length} pendientes</div></div><div class="ph-a"><button class="btn btn-pr" onclick="mEnt()">+ Nueva entrega</button></div></div>
   <div class="card"><div class="tw"><table><thead><tr><th>Cliente</th><th>Mensajero</th><th>Estado</th><th>Fecha</th><th>Firma</th><th>Acciones</th></tr></thead><tbody>
-  ${en.map(e=>{const m=DB.find('usuarios',e.mensajeroId);return`<tr><td><b>${cN(e.clienteId)}</b></td><td>${m?`<span style="display:flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block"></span>${m.nombre}</span>`:'<span style="color:var(--ink3)">Sin asignar</span>'}</td><td>${oB(e.estado)}</td><td>${fD(e.fechaProgramada)}</td><td>${e.firmaCliente?'<span class="badge bg">✓ Firmada</span>':'<span class="badge ba">Pendiente</span>'}</td><td><div style="display:flex;gap:4px">${e.estado==='pendiente'?`<button class="btn btn-pr btn-sm" onclick="inicEnt('${e.id}')">🚚 Iniciar</button>`:''}${isC()?`<button class="btn btn-da btn-sm" onclick="delEnt('${e.id}')">🗑️</button>`:''}</div></td></tr>`}).join('')||'<tr><td colspan="5"><div class="empty"><div class="empty-ic">🚚</div><div class="empty-t">Sin entregas</div></div></td></tr>'}
+  ${en.map(e=>{const m=DB.find('usuarios',e.mensajeroId);return`<tr><td><b>${cN(e.clienteId)}</b></td><td>${m?`<div style="display:flex;align-items:center;gap:6px"><div style="width:8px;height:8px;border-radius:50%;background:var(--green)"></div>${m.nombre}</div>`:'<span style="color:var(--red);font-size:12px;font-weight:600">Sin asignar</span>'}</td><td>${oB(e.estado)}</td><td>${fD(e.fechaProgramada)}</td><td>${e.firmaCliente?'<span class="badge bg">✓ Firmada</span>':'<span class="badge ba">Pendiente</span>'}</td><td><div style="display:flex;gap:4px">${isC()?`<button class="btn btn-se btn-sm" onclick="asignarMens('${e.id}','ent')">👤 Asignar</button>`:''} ${e.estado==='pendiente'?`<button class="btn btn-pr btn-sm" onclick="inicEnt('${e.id}')">🚚 Iniciar</button>`:''}${isC()?`<button class="btn btn-da btn-sm" onclick="delEnt('${e.id}')">🗑️</button>`:''}</div></td></tr>`}).join('')||'<tr><td colspan="5"><div class="empty"><div class="empty-ic">🚚</div><div class="empty-t">Sin entregas</div></div></td></tr>'}
   </tbody></table></div></div>
   <div class="ov" id="m-ent"><div class="modal"><div class="mh"><span class="mt">Nueva Entrega</span><button class="mc btn" onclick="closeM('m-ent')">✕</button></div><div class="mb"><div class="fg"><label>Cliente <span class="req">*</span></label><select class="fc" id="ent-cl"><option value="">Seleccionar...</option>${DB.all('clientes').map(c2=>`<option value="${c2.id}">${c2.empresa}</option>`).join('')}</select></div><div class="fg"><label>Mensajero asignado</label><select class="fc" id="ent-men"><option value="">Seleccionar mensajero...</option>${DB.all('usuarios').filter(u=>u.activo&&(u.rol==='mensajero'||u.rol==='coordinador')).map(u=>`<option value="${u.id}">${u.nombre} (${rL(u.rol)})</option>`).join('')}</select></div><div class="fg"><label>Correo informe</label><input class="fc" id="ent-em" type="email"></div><div class="fg"><label>Fecha programada</label><input class="fc" id="ent-fe" type="date"></div></div><div class="mf"><button class="btn btn-se" onclick="closeM('m-ent')">Cancelar</button><button class="btn btn-pr" onclick="saveEnt()">Crear</button></div></div></div>
   <div class="ov" id="m-cient"><div class="modal lg"><div class="mh"><span class="mt">✅ Cierre de entrega</span><button class="mc btn" onclick="closeM('m-cient')">✕</button></div><div class="mb" id="m-cient-b"></div></div></div>
@@ -908,11 +963,23 @@ function pgMens(c){
       <div style="background:rgba(255,255,255,.15);border-radius:12px;padding:12px 18px;text-align:center;flex:1"><div style="font-size:28px;font-weight:800">${rc.length}</div><div style="font-size:11px;opacity:.8">Recolecciones</div></div>
       <div style="background:rgba(255,255,255,.15);border-radius:12px;padding:12px 18px;text-align:center;flex:1"><div style="font-size:28px;font-weight:800">${en.length}</div><div style="font-size:11px;opacity:.8">Entregas</div></div>
     </div>
+    <div style="margin-top:14px;background:rgba(255,255,255,.1);border-radius:10px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between">
+      <div id="gps-indicador" style="font-size:11px;opacity:.8">${APP.gps?'📍 GPS activo':'⚠️ GPS inactivo'}</div>
+      ${!APP.gps?`<button onclick="activarGPSManual()" style="background:rgba(255,255,255,.2);color:#fff;border:none;border-radius:7px;padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer">Activar GPS</button>`:'<span style="font-size:11px;background:rgba(45,106,79,.4);padding:3px 10px;border-radius:99px">🟢 Transmitiendo</span>'}
+    </div>
   </div>
   ${rc.length?rc.map(r=>{const cl=DB.find('clientes',r.clienteId)||{};return`<div style="background:#fff;border-radius:16px;border:1.5px solid var(--border);padding:18px;margin-bottom:12px;box-shadow:0 2px 8px rgba(0,0,0,.06)"><div style="display:flex;justify-content:space-between;margin-bottom:10px">${pB(r.prioridad)}${oB(r.estado)}</div><div style="font-weight:700;font-size:17px;margin-bottom:4px">📦 ${cl.empresa||'Cliente'}</div><div style="font-size:12px;color:var(--ink3);margin-bottom:3px">📍 ${cl.direccion||''}</div><div style="font-size:12px;color:var(--ink3);margin-bottom:13px">👤 ${cl.contacto||'—'} · 📞 ${cl.telefono||'—'}</div><div style="display:flex;gap:8px;flex-wrap:wrap">${cl.telefono?`<a href="tel:${cl.telefono}" class="btn btn-se btn-sm">📞 Llamar</a>`:''}${cl.lat&&cl.lng?`<button class="btn btn-pr btn-sm" onclick="window.open('https://waze.com/ul?ll=${cl.lat},${cl.lng}&navigate=yes','_blank')">🗺️ Waze</button>`:''}<button class="btn btn-gr btn-sm" onclick="confRec('${r.id}')">✅ Confirmar</button></div></div>`}).join(''):'<div class="empty"><div class="empty-ic">📦</div><div class="empty-t">¡Todo al día!</div><div style="color:var(--ink3);font-size:13px">Sin órdenes pendientes</div></div>'}
   </div>`;
 }
 function confRec(id){ DB.save('recolecciones',{...DB.find('recolecciones',id),estado:'completada'}); toast('Confirmado ✓','success'); goTo('mensajero'); }
+
+function activarGPSManual(){
+  if(!APP.gps){
+    startGPS();
+  } else {
+    toast('GPS ya está activo','info');
+  }
+}
 
 // ── MAPA ────────────────────────────────────────────────────────────────────
 let _mapaL = null, _mapaMarkers = {}, _mapaTimer = null;
@@ -951,17 +1018,12 @@ async function pgMapa(c){
     attribution:'© OpenStreetMap', maxZoom:19
   }).addTo(_mapaL);
 
-  // Cargar últimas ubicaciones guardadas en DB
+  // Cargar ubicaciones
   await mapaRefresh();
 
-  // Suscribirse al canal en tiempo real
-  suscribirMapa();
-
-  // Ping cada 10s para mantener WS vivo
+  // Actualizar cada 8 segundos
   if(_mapaTimer) clearInterval(_mapaTimer);
-  _mapaTimer = setInterval(()=>{
-    if(APP.ws&&APP.ws.readyState===1) APP.ws.send(JSON.stringify({topic:'phoenix',event:'heartbeat',payload:{},ref:'hb'}));
-  }, 10000);
+  _mapaTimer = setInterval(mapaRefresh, 8000);
 }
 
 async function mapaRefresh(){
