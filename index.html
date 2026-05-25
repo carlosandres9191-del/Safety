@@ -788,24 +788,123 @@ function pgMens(c){
 function confRec(id){ DB.save('recolecciones',{...DB.find('recolecciones',id),estado:'completada'}); toast('Confirmado ✓','success'); goTo('mensajero'); }
 
 // ── MAPA ────────────────────────────────────────────────────────────────────
+let _mapaL = null, _mapaMarkers = {}, _mapaTimer = null;
+
 async function pgMapa(c){
-  c.innerHTML='<div style="padding:28px;text-align:center;color:var(--ink3)">🗺️ Cargando ubicaciones...</div>';
-  const ubs=await sbGet('ubicaciones')||[];
-  const mens=DB.all('usuarios').filter(u=>u.rol==='mensajero'&&u.activo);
-  const now2=new Date();
-  function mapaUrl(){const ac=ubs.filter(l=>l.lat&&l.lng&&(now2-new Date(l.ts))<3600000);if(!ac.length)return'https://www.openstreetmap.org/export/embed.html?bbox=-75.65%2C6.15%2C-75.50%2C6.35&layer=mapnik';const d=0.04;return`https://www.openstreetmap.org/export/embed.html?bbox=${ac[0].lng-d}%2C${ac[0].lat-d}%2C${ac[0].lng+d}%2C${ac[0].lat+d}&layer=mapnik&marker=${ac[0].lat}%2C${ac[0].lng}`;}
   c.innerHTML=`<div style="padding:28px">
-  <div class="ph"><div><div class="ph-t">🗺️ Mapa Mensajeros</div><div class="ph-s">Ubicación GPS en tiempo real</div></div><div class="ph-a"><button class="btn btn-se" onclick="pgMapa(ge('pg'))">🔄 Actualizar</button></div></div>
+  <div class="ph"><div><div class="ph-t">🗺️ Mapa Mensajeros</div><div class="ph-s">Ubicación GPS en tiempo real</div></div><div class="ph-a"><button class="btn btn-se" onclick="mapaRefresh()">🔄 Actualizar</button></div></div>
   <div style="display:grid;grid-template-columns:280px 1fr;gap:16px;align-items:start">
-    <div class="card"><div class="ch"><span class="ct">👤 Mensajeros</span></div><div>
-    ${mens.length?mens.map(u=>{const loc=ubs.find(l=>(l.usuarioId||l.id)===u.id);const mins=loc?Math.floor((now2-new Date(loc.ts))/60000):null;const ac=mins!==null&&mins<30;return`<div style="padding:14px 16px;border-bottom:1px solid var(--border)"><div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><div style="width:11px;height:11px;border-radius:50%;background:${ac?'var(--green)':'var(--border)'};flex-shrink:0;${ac?'box-shadow:0 0 0 3px var(--green-l)':''}"></div><div><div style="font-weight:600">${u.nombre}</div><div style="font-size:11px;color:var(--ink3)">${ac?`Activo hace ${mins} min`:'Sin ubicación'}</div>${loc?`<div style="font-size:10px;color:var(--ink3)">${Number(loc.lat).toFixed(4)}, ${Number(loc.lng).toFixed(4)}</div>`:''}</div></div>${loc&&ac?`<div style="display:flex;gap:6px"><button class="btn btn-se btn-sm" onclick="centrarMapa(${loc.lat},${loc.lng})">📍 Ver</button><button class="btn btn-se btn-sm" onclick="window.open('https://waze.com/ul?ll=${loc.lat},${loc.lng}&navigate=yes','_blank')">🗺️</button></div>`:''}</div>`}).join(''):'<div style="padding:20px;text-align:center;color:var(--ink3)">Sin mensajeros registrados</div>'}
-    </div></div>
-    <div class="card"><div class="ch"><span class="ct">🗺️ Mapa</span></div><iframe id="mapa-if" src="${mapaUrl()}" style="width:100%;height:500px;border:none" loading="lazy"></iframe></div>
+    <div class="card"><div class="ch"><span class="ct">👤 Mensajeros</span></div><div id="lista-mens"><div style="padding:20px;text-align:center;color:var(--ink3)">Cargando...</div></div></div>
+    <div class="card"><div class="ch"><span class="ct">🗺️ Mapa en tiempo real</span><div class="ca"><span style="font-size:11px;color:var(--ink3)" id="mapa-st">Cargando...</span></div></div><div id="mapa-ct" style="height:500px;border-radius:0 0 14px 14px;overflow:hidden"></div></div>
   </div>
-  <div class="al al-b" style="margin-top:14px">ℹ️ El GPS se activa automáticamente cuando el mensajero inicia sesión. Verde = activo en últimos 30 minutos.</div>
+  <div class="al al-b" style="margin-top:14px">ℹ️ El GPS se activa cuando el mensajero inicia sesión. 🟢 Verde = activo últimos 30 min. Se actualiza automáticamente cada 15 segundos.</div>
   </div>`;
+
+  // Cargar Leaflet CSS
+  if(!document.getElementById('leaflet-css')){
+    const lk=document.createElement('link');
+    lk.id='leaflet-css'; lk.rel='stylesheet';
+    lk.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+    document.head.appendChild(lk);
+  }
+
+  // Cargar Leaflet JS
+  if(!window.L){
+    await new Promise(resolve=>{
+      const s=document.createElement('script');
+      s.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+      s.onload=resolve; document.head.appendChild(s);
+    });
+  }
+
+  // Inicializar mapa centrado en Medellín
+  _mapaL = L.map('mapa-ct').setView([6.2071,-75.5748],12);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+    attribution:'© OpenStreetMap', maxZoom:19
+  }).addTo(_mapaL);
+
+  // Cargar ubicaciones
+  await mapaRefresh();
+
+  // Auto-refresh cada 15 segundos
+  if(_mapaTimer) clearInterval(_mapaTimer);
+  _mapaTimer = setInterval(mapaRefresh, 15000);
 }
-function centrarMapa(lat,lng){const d=0.015,f=ge('mapa-if');if(f)f.src=`https://www.openstreetmap.org/export/embed.html?bbox=${lng-d}%2C${lat-d}%2C${lng+d}%2C${lat+d}&layer=mapnik&marker=${lat}%2C${lng}`;}
+
+async function mapaRefresh(){
+  const ubs = await sbGet('ubicaciones') || [];
+  const mens = DB.all('usuarios').filter(u=>u.rol==='mensajero'&&u.activo);
+  const now2 = new Date();
+  const st = ge('mapa-st');
+  if(st) st.textContent = `Actualizado: ${now2.toLocaleTimeString('es-CO')}`;
+
+  // Actualizar lista
+  const lista = ge('lista-mens');
+  if(lista){
+    lista.innerHTML = mens.length ? mens.map(u=>{
+      const loc = ubs.find(l=>(l.usuarioId||l.id)===u.id);
+      const mins = loc ? Math.floor((now2-new Date(loc.ts))/60000) : null;
+      const ac = mins!==null && mins<30;
+      return `<div style="padding:14px 16px;border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <div style="width:12px;height:12px;border-radius:50%;background:${ac?'var(--green)':'var(--border)'};flex-shrink:0;${ac?'box-shadow:0 0 0 3px var(--green-l)':''}"></div>
+          <div>
+            <div style="font-weight:600">${u.nombre}</div>
+            <div style="font-size:11px;color:var(--ink3)">${ac?`Activo hace ${mins} min`:'Sin ubicación reciente'}</div>
+            ${loc?`<div style="font-size:10px;color:var(--ink3)">📍 ${Number(loc.lat).toFixed(5)}, ${Number(loc.lng).toFixed(5)}</div>`:''}
+          </div>
+        </div>
+        ${loc&&ac?`<div style="display:flex;gap:6px">
+          <button class="btn btn-se btn-sm" onclick="mapaIrA(${loc.lat},${loc.lng})">📍 Ver</button>
+          <button class="btn btn-se btn-sm" onclick="window.open('https://waze.com/ul?ll=${loc.lat},${loc.lng}&navigate=yes','_blank')">🗺️ Waze</button>
+        </div>`:''}
+      </div>`;
+    }).join('') : '<div style="padding:20px;text-align:center;color:var(--ink3)">Sin mensajeros registrados</div>';
+  }
+
+  // Actualizar marcadores en el mapa
+  if(!_mapaL || !window.L) return;
+
+  mens.forEach(u=>{
+    const loc = ubs.find(l=>(l.usuarioId||l.id)===u.id);
+    const mins = loc ? Math.floor((now2-new Date(loc.ts))/60000) : null;
+    const ac = mins!==null && mins<30;
+
+    if(!loc || !loc.lat || !loc.lng) {
+      // Sin ubicación - quitar marcador si existía
+      if(_mapaMarkers[u.id]){ _mapaL.removeLayer(_mapaMarkers[u.id]); delete _mapaMarkers[u.id]; }
+      return;
+    }
+
+    const color = ac ? '#2d6a4f' : '#9090a0';
+    const icon = L.divIcon({
+      className:'',
+      html:`<div style="background:${color};width:20px;height:20px;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.3);display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:700">${u.nombre[0]}</div>`,
+      iconSize:[20,20], iconAnchor:[10,10]
+    });
+    const popup = `<div style="font-family:system-ui;min-width:160px"><div style="font-weight:700;margin-bottom:4px">${u.nombre}</div><div style="font-size:12px;color:#666">${ac?`Activo hace ${mins} min`:'Sin actividad reciente'}</div><div style="font-size:11px;color:#888;margin-top:4px">${fDT(loc.ts)}</div><div style="margin-top:8px"><a href="https://waze.com/ul?ll=${loc.lat},${loc.lng}&navigate=yes" target="_blank" style="color:#e63946;font-size:12px;font-weight:600">🗺️ Abrir en Waze</a></div></div>`;
+
+    if(_mapaMarkers[u.id]){
+      _mapaMarkers[u.id].setLatLng([loc.lat,loc.lng]).setIcon(icon).bindPopup(popup);
+    } else {
+      _mapaMarkers[u.id] = L.marker([loc.lat,loc.lng],{icon}).addTo(_mapaL).bindPopup(popup);
+    }
+  });
+
+  // Si hay marcadores, ajustar vista
+  const activos = Object.values(_mapaMarkers);
+  if(activos.length===1){
+    const pos = activos[0].getLatLng();
+    _mapaL.setView([pos.lat,pos.lng],15);
+  } else if(activos.length>1){
+    const group = L.featureGroup(activos);
+    _mapaL.fitBounds(group.getBounds().pad(0.2));
+  }
+}
+
+function mapaIrA(lat,lng){
+  if(_mapaL) _mapaL.setView([lat,lng],17);
+}
 
 // ── AUDITORÍA ─────────────────────────────────────────────────────────────────
 function pgAud(c){
