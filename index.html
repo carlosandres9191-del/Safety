@@ -460,12 +460,106 @@ function onlineCheck(){
 }
 
 function startGPS(){
-  if(!navigator.geolocation)return;
-  APP.gps=navigator.geolocation.watchPosition(async pos=>{
-    const loc={id:APP.user.id,usuarioId:APP.user.id,nombre:APP.user.nombre,lat:pos.coords.latitude,lng:pos.coords.longitude,ts:ts(),activo:true};
-    C.set('loc_'+APP.user.id,loc); await sbSave('ubicaciones',loc);
-  },e=>console.warn('GPS:',e.message),{enableHighAccuracy:true,maximumAge:10000,timeout:15000});
-  toast('📍 GPS activado','info');
+  if(!navigator.geolocation){ toast('GPS no disponible en este dispositivo','error'); return; }
+  let lastSave = 0;
+  APP.gps = navigator.geolocation.watchPosition(async pos=>{
+    const loc = {
+      id: APP.user.id,
+      usuarioId: APP.user.id,
+      nombre: APP.user.nombre,
+      lat: pos.coords.latitude,
+      lng: pos.coords.longitude,
+      ts: ts(),
+      activo: true
+    };
+    // Guardar en cache local
+    C.set('loc_'+APP.user.id, loc);
+    // Broadcast en tiempo real via Supabase Realtime
+    if(APP.realtimeChannel){
+      APP.realtimeChannel.send({
+        type: 'broadcast',
+        event: 'gps',
+        payload: loc
+      });
+    }
+    // Guardar en DB cada 30 segundos para persistencia
+    const ahora = Date.now();
+    if(ahora - lastSave > 30000){
+      lastSave = ahora;
+      sbSave('ubicaciones', loc);
+    }
+  }, e=>{ console.warn('GPS error:',e.message); toast('Error GPS: '+e.message,'error'); },
+  {enableHighAccuracy:true, maximumAge:5000, timeout:10000});
+  // Conectar canal Realtime
+  iniciarRealtime();
+  toast('📍 GPS activado — transmitiendo en tiempo real','success');
+}
+
+function iniciarRealtime(){
+  if(APP.realtimeChannel) return;
+  // Usar Supabase Realtime WebSocket
+  const wsUrl = SBURL.replace('https://','wss://') + '/realtime/v1/websocket?apikey=' + SBKEY + '&vsn=1.0.0';
+  const ws = new WebSocket(wsUrl);
+  const channelName = 'gps-mensajeros';
+  APP.ws = ws;
+  ws.onopen = ()=>{
+    // Unirse al canal
+    ws.send(JSON.stringify({topic:`realtime:${channelName}`,event:'phx_join',payload:{config:{broadcast:{self:true}}},ref:'1'}));
+  };
+  ws.onmessage = (msg)=>{
+    try {
+      const data = JSON.parse(msg.data);
+      if(data.event==='broadcast'&&data.payload&&data.payload.payload){
+        const loc = data.payload.payload;
+        // Actualizar cache con ubicación recibida
+        C.set('loc_'+loc.usuarioId, loc);
+        // Si el mapa está abierto, actualizar marcador
+        if(_mapaL && window.L && loc.lat && loc.lng) actualizarMarcador(loc);
+      }
+    } catch(e){}
+  };
+  ws.onerror = e=>console.warn('WS error:',e);
+  ws.onclose = ()=>{ APP.realtimeChannel=null; APP.ws=null; };
+  APP.realtimeChannel = {
+    send: (payload)=>{
+      if(ws.readyState===1){
+        ws.send(JSON.stringify({
+          topic:`realtime:${channelName}`,
+          event:'broadcast',
+          payload: payload,
+          ref: Date.now().toString()
+        }));
+      }
+    }
+  };
+}
+
+function suscribirMapa(){
+  // Suscribirse al canal para recibir ubicaciones en tiempo real
+  if(APP.ws && APP.ws.readyState===1) return; // ya conectado
+  iniciarRealtime();
+}
+
+function actualizarMarcador(loc){
+  if(!_mapaL||!window.L) return;
+  const u = DB.find('usuarios', loc.usuarioId);
+  const nombre = u ? u.nombre : (loc.nombre||'Mensajero');
+  const icon = L.divIcon({
+    className:'',
+    html:`<div style="background:#2d6a4f;width:22px;height:22px;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;font-weight:700">${nombre[0]}</div>`,
+    iconSize:[22,22], iconAnchor:[11,11]
+  });
+  const popup = `<div style="font-family:system-ui;min-width:160px"><div style="font-weight:700;margin-bottom:4px">${nombre}</div><div style="font-size:11px;color:#888">${fDT(loc.ts)}</div><div style="margin-top:8px"><a href="https://waze.com/ul?ll=${loc.lat},${loc.lng}&navigate=yes" target="_blank" style="color:#e63946;font-size:12px;font-weight:600">🗺️ Waze</a></div></div>`;
+  if(_mapaMarkers[loc.usuarioId]){
+    _mapaMarkers[loc.usuarioId].setLatLng([loc.lat,loc.lng]).setIcon(icon).bindPopup(popup);
+  } else {
+    _mapaMarkers[loc.usuarioId]=L.marker([loc.lat,loc.lng],{icon}).addTo(_mapaL).bindPopup(popup);
+  }
+  // Actualizar lista si existe
+  const item = document.getElementById('mens-'+loc.usuarioId);
+  if(item){
+    item.innerHTML=`<span style="color:#2d6a4f;font-weight:600">🟢 En vivo</span> — ${Number(loc.lat).toFixed(4)}, ${Number(loc.lng).toFixed(4)}`;
+  }
 }
 
 // ── DASHBOARD ──────────────────────────────────────────────────────────
@@ -567,15 +661,48 @@ function mExt(id){
   ge('ext-cl').value=e.clienteId||''; ge('ext-ser').value=e.serial||''; ge('ext-ub').value=e.ubicacion||'';
   ge('ext-tp').value=e.tipo||'ABC'; ge('ext-cap').value=e.capacidad||''; ge('ext-lib').value=e.libras||'';
   ge('ext-mmt').value=e.mmt||''; ge('ext-ven').value=e.fechaVencimiento||''; ge('ext-est').value=e.estado||'activo';
+  // Cargar foto existente
+  _extFoto = null;
+  const prev = ge('ext-foto-prev');
+  if(prev){ prev.innerHTML = e.foto ? `<img src="${e.foto}" style="width:100%;max-height:180px;object-fit:cover;border-radius:10px;border:1.5px solid var(--border)">` : ''; }
   openM('m-ext');
 }
+let _extFoto = null;
+
+function cargarFoto(input){
+  const file = input.files[0]; if(!file)return;
+  const reader = new FileReader();
+  reader.onload = e=>{
+    _extFoto = e.target.result;
+    const prev = ge('ext-foto-prev');
+    if(prev) prev.innerHTML=`<img src="${_extFoto}" style="width:100%;max-height:180px;object-fit:cover;border-radius:10px;border:1.5px solid var(--border)">`;
+  };
+  reader.readAsDataURL(file);
+}
+
+function quitarFoto(){
+  _extFoto = null;
+  const prev = ge('ext-foto-prev'); if(prev) prev.innerHTML='';
+  const inp = ge('ext-foto-input'); if(inp) inp.value='';
+}
+
 function saveExt(){
   const cid=ge('ext-cl').value,ser=ge('ext-ser').value.trim(),ub=ge('ext-ub').value.trim(),ven=ge('ext-ven').value;
   if(!cid||!ser||!ub||!ven){toast('Completa los campos obligatorios','error');return;}
   const id=ge('ext-id').value;
-  const data={clienteId:cid,serial:ser,ubicacion:ub,tipo:ge('ext-tp').value,capacidad:ge('ext-cap').value.trim(),libras:ge('ext-lib').value?parseFloat(ge('ext-lib').value):null,mmt:ge('ext-mmt').value!==''?parseInt(ge('ext-mmt').value):null,fechaVencimiento:ven,estado:ge('ext-est').value};
+  const existente = id ? DB.find('extintores',id) : {};
+  const data={
+    clienteId:cid, serial:ser, ubicacion:ub,
+    tipo:ge('ext-tp').value, capacidad:ge('ext-cap').value.trim(),
+    libras:ge('ext-lib').value?parseFloat(ge('ext-lib').value):null,
+    mmt:ge('ext-mmt').value!==''?parseInt(ge('ext-mmt').value):null,
+    fechaVencimiento:ven, estado:ge('ext-est').value,
+    foto: _extFoto !== null ? _extFoto : (existente.foto||null)
+  };
   if(id) data.id=id;
-  DB.save('extintores',data); toast(id?'Actualizado ✓':'Registrado ✓','success'); closeM('m-ext'); goTo('extintores');
+  DB.save('extintores',data);
+  toast(id?'Actualizado ✓':'Registrado ✓','success');
+  closeM('m-ext'); goTo('extintores');
 }
 function delExt(id,s){ confirmSA(`Eliminar extintor: ${s}`,()=>{DB.del('extintores',id);toast('Eliminado','success');goTo('extintores')}) }
 function verHV(id){
@@ -623,7 +750,7 @@ function dlQR(){ const img=ge('qr-img');if(!img)return;const a=document.createEl
 // ── RECOLECCIONES ────────────────────────────────────────────────────────
 function pgRec(c){
   const rc=DB.all('recolecciones'), cl=DB.all('clientes');
-  const mens=DB.all('usuarios').filter(u=>u.rol==='mensajero'||u.rol==='coordinador'||u.rol==='superadmin');
+  const mens=DB.all('usuarios').filter(u=>u.activo&&(u.rol==='mensajero'||u.rol==='coordinador'||u.rol==='superadmin'));
   c.innerHTML=`<div style="padding:28px">
   <div class="ph"><div><div class="ph-t">📦 Recolecciones</div><div class="ph-s">${rc.filter(r=>r.estado==='pendiente').length} pendientes de ${rc.length}</div></div><div class="ph-a"><select class="fc" style="width:auto" onchange="fAttr('t-rc','data-est',this.value)"><option value="">Todos</option><option value="pendiente">Pendiente</option><option value="en_ruta">En ruta</option><option value="completada">Completada</option></select>${isC()?`<button class="btn btn-pr" onclick="mRec()">+ Nueva orden</button>`:''}</div></div>
   <div class="card"><div class="tw"><table id="t-rc"><thead><tr><th>Cliente</th><th>Mensajero</th><th>Estado</th><th>Prioridad</th><th>Fecha</th><th>Acciones</th></tr></thead><tbody>
@@ -643,15 +770,15 @@ function pgEnt(c){
   const en=DB.all('entregas');
   c.innerHTML=`<div style="padding:28px">
   <div class="ph"><div><div class="ph-t">🚚 Entregas</div><div class="ph-s">${en.filter(e=>e.estado==='pendiente').length} pendientes</div></div><div class="ph-a"><button class="btn btn-pr" onclick="mEnt()">+ Nueva entrega</button></div></div>
-  <div class="card"><div class="tw"><table><thead><tr><th>Cliente</th><th>Estado</th><th>Fecha</th><th>Firma</th><th>Acciones</th></tr></thead><tbody>
-  ${en.map(e=>`<tr><td><b>${cN(e.clienteId)}</b></td><td>${oB(e.estado)}</td><td>${fD(e.fechaProgramada)}</td><td>${e.firmaCliente?'<span class="badge bg">✓ Firmada</span>':'<span class="badge ba">Pendiente</span>'}</td><td><div style="display:flex;gap:4px">${e.estado==='pendiente'?`<button class="btn btn-pr btn-sm" onclick="inicEnt('${e.id}')">🚚 Iniciar</button>`:''}${isC()?`<button class="btn btn-da btn-sm" onclick="delEnt('${e.id}')">🗑️</button>`:''}</div></td></tr>`).join('')||'<tr><td colspan="5"><div class="empty"><div class="empty-ic">🚚</div><div class="empty-t">Sin entregas</div></div></td></tr>'}
+  <div class="card"><div class="tw"><table><thead><tr><th>Cliente</th><th>Mensajero</th><th>Estado</th><th>Fecha</th><th>Firma</th><th>Acciones</th></tr></thead><tbody>
+  ${en.map(e=>{const m=DB.find('usuarios',e.mensajeroId);return`<tr><td><b>${cN(e.clienteId)}</b></td><td>${m?`<span style="display:flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block"></span>${m.nombre}</span>`:'<span style="color:var(--ink3)">Sin asignar</span>'}</td><td>${oB(e.estado)}</td><td>${fD(e.fechaProgramada)}</td><td>${e.firmaCliente?'<span class="badge bg">✓ Firmada</span>':'<span class="badge ba">Pendiente</span>'}</td><td><div style="display:flex;gap:4px">${e.estado==='pendiente'?`<button class="btn btn-pr btn-sm" onclick="inicEnt('${e.id}')">🚚 Iniciar</button>`:''}${isC()?`<button class="btn btn-da btn-sm" onclick="delEnt('${e.id}')">🗑️</button>`:''}</div></td></tr>`}).join('')||'<tr><td colspan="5"><div class="empty"><div class="empty-ic">🚚</div><div class="empty-t">Sin entregas</div></div></td></tr>'}
   </tbody></table></div></div>
-  <div class="ov" id="m-ent"><div class="modal"><div class="mh"><span class="mt">Nueva Entrega</span><button class="mc btn" onclick="closeM('m-ent')">✕</button></div><div class="mb"><div class="fg"><label>Cliente</label><select class="fc" id="ent-cl"><option value="">Seleccionar...</option>${DB.all('clientes').map(c2=>`<option value="${c2.id}">${c2.empresa}</option>`).join('')}</select></div><div class="fg"><label>Correo informe</label><input class="fc" id="ent-em" type="email"></div><div class="fg"><label>Fecha</label><input class="fc" id="ent-fe" type="date"></div></div><div class="mf"><button class="btn btn-se" onclick="closeM('m-ent')">Cancelar</button><button class="btn btn-pr" onclick="saveEnt()">Crear</button></div></div></div>
+  <div class="ov" id="m-ent"><div class="modal"><div class="mh"><span class="mt">Nueva Entrega</span><button class="mc btn" onclick="closeM('m-ent')">✕</button></div><div class="mb"><div class="fg"><label>Cliente <span class="req">*</span></label><select class="fc" id="ent-cl"><option value="">Seleccionar...</option>${DB.all('clientes').map(c2=>`<option value="${c2.id}">${c2.empresa}</option>`).join('')}</select></div><div class="fg"><label>Mensajero asignado</label><select class="fc" id="ent-men"><option value="">Seleccionar mensajero...</option>${DB.all('usuarios').filter(u=>u.activo&&(u.rol==='mensajero'||u.rol==='coordinador')).map(u=>`<option value="${u.id}">${u.nombre} (${rL(u.rol)})</option>`).join('')}</select></div><div class="fg"><label>Correo informe</label><input class="fc" id="ent-em" type="email"></div><div class="fg"><label>Fecha programada</label><input class="fc" id="ent-fe" type="date"></div></div><div class="mf"><button class="btn btn-se" onclick="closeM('m-ent')">Cancelar</button><button class="btn btn-pr" onclick="saveEnt()">Crear</button></div></div></div>
   <div class="ov" id="m-cient"><div class="modal lg"><div class="mh"><span class="mt">✅ Cierre de entrega</span><button class="mc btn" onclick="closeM('m-cient')">✕</button></div><div class="mb" id="m-cient-b"></div></div></div>
   </div>`;
 }
 function mEnt(){ openM('m-ent') }
-function saveEnt(){ const cid=ge('ent-cl').value; if(!cid){toast('Selecciona cliente','error');return;} DB.save('entregas',{clienteId:cid,estado:'pendiente',fechaProgramada:ge('ent-fe').value,correoEnvio:ge('ent-em').value.trim(),firmaCliente:null,extintores:[]}); toast('Creada ✓','success'); closeM('m-ent'); goTo('entregas'); }
+function saveEnt(){ const cid=ge('ent-cl').value; if(!cid){toast('Selecciona cliente','error');return;} DB.save('entregas',{clienteId:cid,mensajeroId:ge('ent-men').value,estado:'pendiente',fechaProgramada:ge('ent-fe').value,correoEnvio:ge('ent-em').value.trim(),firmaCliente:null,extintores:[]}); toast('Entrega creada y asignada ✓','success'); closeM('m-ent'); goTo('entregas'); }
 function delEnt(id){ confirmSA('Eliminar entrega',()=>{DB.del('entregas',id);toast('Eliminada','success');goTo('entregas')}) }
 function inicEnt(id){
   const e=DB.find('entregas',id); if(!e)return;
@@ -792,12 +919,13 @@ let _mapaL = null, _mapaMarkers = {}, _mapaTimer = null;
 
 async function pgMapa(c){
   c.innerHTML=`<div style="padding:28px">
-  <div class="ph"><div><div class="ph-t">🗺️ Mapa Mensajeros</div><div class="ph-s">Ubicación GPS en tiempo real</div></div><div class="ph-a"><button class="btn btn-se" onclick="mapaRefresh()">🔄 Actualizar</button></div></div>
+  <div class="ph"><div><div class="ph-t">🗺️ Mapa Mensajeros</div><div class="ph-s">Ubicación GPS en tiempo real via WebSocket</div></div><div class="ph-a"><button class="btn btn-se" onclick="mapaRefresh()">🔄 Recargar</button></div></div>
+  <div class="al al-g" style="margin-bottom:16px">🔴 En vivo — Las ubicaciones se actualizan automáticamente sin necesidad de recargar</div>
   <div style="display:grid;grid-template-columns:280px 1fr;gap:16px;align-items:start">
     <div class="card"><div class="ch"><span class="ct">👤 Mensajeros</span></div><div id="lista-mens"><div style="padding:20px;text-align:center;color:var(--ink3)">Cargando...</div></div></div>
-    <div class="card"><div class="ch"><span class="ct">🗺️ Mapa en tiempo real</span><div class="ca"><span style="font-size:11px;color:var(--ink3)" id="mapa-st">Cargando...</span></div></div><div id="mapa-ct" style="height:500px;border-radius:0 0 14px 14px;overflow:hidden"></div></div>
+    <div class="card"><div class="ch"><span class="ct">🗺️ Mapa</span><div class="ca"><span style="font-size:11px;color:var(--ink3);background:#f0fdf4;padding:3px 8px;border-radius:99px;border:1px solid #b7e4c7" id="mapa-st">⏳ Conectando...</span></div></div><div id="mapa-ct" style="height:520px;border-radius:0 0 14px 14px;overflow:hidden"></div></div>
   </div>
-  <div class="al al-b" style="margin-top:14px">ℹ️ El GPS se activa cuando el mensajero inicia sesión. 🟢 Verde = activo últimos 30 min. Se actualiza automáticamente cada 15 segundos.</div>
+  <div class="al al-b" style="margin-top:14px">ℹ️ El mensajero debe tener la app abierta y haber aceptado el permiso de ubicación. Los datos llegan directamente sin pasar por la base de datos.</div>
   </div>`;
 
   // Cargar Leaflet CSS
@@ -823,12 +951,17 @@ async function pgMapa(c){
     attribution:'© OpenStreetMap', maxZoom:19
   }).addTo(_mapaL);
 
-  // Cargar ubicaciones
+  // Cargar últimas ubicaciones guardadas en DB
   await mapaRefresh();
 
-  // Auto-refresh cada 15 segundos
+  // Suscribirse al canal en tiempo real
+  suscribirMapa();
+
+  // Ping cada 10s para mantener WS vivo
   if(_mapaTimer) clearInterval(_mapaTimer);
-  _mapaTimer = setInterval(mapaRefresh, 15000);
+  _mapaTimer = setInterval(()=>{
+    if(APP.ws&&APP.ws.readyState===1) APP.ws.send(JSON.stringify({topic:'phoenix',event:'heartbeat',payload:{},ref:'hb'}));
+  }, 10000);
 }
 
 async function mapaRefresh(){
@@ -836,7 +969,7 @@ async function mapaRefresh(){
   const mens = DB.all('usuarios').filter(u=>u.rol==='mensajero'&&u.activo);
   const now2 = new Date();
   const st = ge('mapa-st');
-  if(st) st.textContent = `Actualizado: ${now2.toLocaleTimeString('es-CO')}`;
+  if(st){ st.textContent = `✓ Actualizado: ${now2.toLocaleTimeString('es-CO')}`; st.style.background='#f0fdf4'; st.style.color='#2d6a4f'; }
 
   // Actualizar lista
   const lista = ge('lista-mens');
@@ -984,8 +1117,131 @@ function savePf(){
   ['pf-act','pf-new','pf-conf'].forEach(id=>{const e=ge(id);if(e)e.value=''});
 }
 
+// ── PORTAL PÚBLICO QR ────────────────────────────────────────────────────────
+async function showPortalQR(extId){
+  // Cargar datos del extintor desde Supabase sin auth
+  const headers = {'apikey':SBKEY,'Authorization':'Bearer '+SBKEY};
+  let ext = null, cliente = null;
+  try {
+    const re = await fetch(`${SBURL}/rest/v1/extintores?id=eq.${extId}&select=*`,{headers});
+    if(re.ok){ const data=await re.json(); ext=data[0]||null; }
+    if(ext && ext.clienteId){
+      const rc = await fetch(`${SBURL}/rest/v1/clientes?id=eq.${ext.clienteId}&select=*`,{headers});
+      if(rc.ok){ const data=await rc.json(); cliente=data[0]||null; }
+    }
+  } catch(e){ console.warn('Portal QR error:',e.message); }
+
+  const body = document.body;
+  body.style.background = '#f0f2f5';
+  body.innerHTML = `
+  <div style="min-height:100vh;background:linear-gradient(160deg,#1a1a2e 0%,#16213e 40%,#f0f2f5 40%);padding:0;font-family:system-ui,sans-serif">
+    <div style="max-width:480px;margin:0 auto;padding:24px 16px">
+      <!-- Header Safety -->
+      <div style="display:flex;align-items:center;gap:12px;padding:20px 0 28px">
+        <div style="width:44px;height:44px;background:#e63946;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:20px;color:#fff;box-shadow:0 4px 12px rgba(230,57,70,.4)">S</div>
+        <div>
+          <div style="font-weight:700;font-size:15px;color:#fff">Extintores Safety S.A.S</div>
+          <div style="font-size:11px;color:rgba(255,255,255,.5)">ISO 9001-2015 · CO23.08213</div>
+        </div>
+        <div style="margin-left:auto;background:rgba(255,255,255,.1);border-radius:99px;padding:4px 12px;font-size:10px;font-weight:600;color:rgba(255,255,255,.7)">Portal Público</div>
+      </div>
+
+      ${ext ? `
+      <!-- Foto del extintor -->
+      <div style="background:#fff;border-radius:20px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.15);margin-bottom:16px">
+        ${ext.foto
+          ? `<img src="${ext.foto}" style="width:100%;height:220px;object-fit:cover" alt="Foto extintor">`
+          : `<div style="width:100%;height:180px;background:linear-gradient(135deg,#fee2e2,#fdf0ef);display:flex;flex-direction:column;align-items:center;justify-content:center;color:#e63946">
+               <div style="font-size:56px;margin-bottom:8px">🧯</div>
+               <div style="font-size:13px;font-weight:500">Sin foto registrada</div>
+             </div>`
+        }
+        <div style="padding:20px">
+          <!-- Estado -->
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+            <div style="font-weight:800;font-size:20px;letter-spacing:-.5px">${ext.serial}</div>
+            ${(()=>{const d=dTo(ext.fechaVencimiento);if(d===null)return'';if(d<0)return'<span style="background:#fee2e2;color:#c1121f;padding:5px 12px;border-radius:99px;font-size:12px;font-weight:700">🚨 VENCIDO</span>';if(d<=30)return`<span style="background:#fff3e0;color:#8d4d00;padding:5px 12px;border-radius:99px;font-size:12px;font-weight:700">⚠️ Vence en ${d}d</span>`;if(d<=90)return`<span style="background:#e8f4f8;color:#1d3557;padding:5px 12px;border-radius:99px;font-size:12px;font-weight:700">📅 Vence en ${d}d</span>`;return'<span style="background:#d8f3dc;color:#2d6a4f;padding:5px 12px;border-radius:99px;font-size:12px;font-weight:700">✅ Vigente</span>';})()}
+          </div>
+
+          <!-- Datos del extintor -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+            <div style="background:#f8f9fc;border-radius:10px;padding:12px">
+              <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#9090a0;margin-bottom:4px">Tipo</div>
+              <div style="font-weight:600;font-size:14px">${ext.tipo||'—'}</div>
+            </div>
+            <div style="background:#f8f9fc;border-radius:10px;padding:12px">
+              <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#9090a0;margin-bottom:4px">Capacidad</div>
+              <div style="font-weight:600;font-size:14px">${ext.capacidad||'—'}</div>
+            </div>
+            <div style="background:#f8f9fc;border-radius:10px;padding:12px">
+              <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#9090a0;margin-bottom:4px">Ubicación</div>
+              <div style="font-weight:600;font-size:13px">${ext.ubicacion||'—'}</div>
+            </div>
+            <div style="background:#f8f9fc;border-radius:10px;padding:12px">
+              <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#9090a0;margin-bottom:4px">Vencimiento</div>
+              <div style="font-weight:600;font-size:13px">${fD(ext.fechaVencimiento)}</div>
+            </div>
+            ${ext.libras!==null&&ext.libras!==undefined?`
+            <div style="background:#f8f9fc;border-radius:10px;padding:12px">
+              <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#9090a0;margin-bottom:4px">Libras CO₂</div>
+              <div style="font-weight:600;font-size:14px">${ext.libras}</div>
+            </div>`:''}
+            ${ext.mmt!==null&&ext.mmt!==undefined?`
+            <div style="background:#f8f9fc;border-radius:10px;padding:12px">
+              <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#9090a0;margin-bottom:4px">MMT</div>
+              <div style="font-weight:600;font-size:14px">${ext.mmt}</div>
+            </div>`:''}
+          </div>
+
+          <!-- Cliente -->
+          ${cliente?`
+          <div style="border-top:1px solid #f0f2f5;padding-top:14px;margin-bottom:14px">
+            <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#9090a0;margin-bottom:8px">Empresa</div>
+            <div style="font-weight:700;font-size:15px;margin-bottom:3px">${cliente.empresa}</div>
+            <div style="font-size:13px;color:#666">${cliente.direccion||''} ${cliente.ciudad?'· '+cliente.ciudad:''}</div>
+          </div>`:''}
+
+          <!-- Contacto Safety -->
+          <div style="background:linear-gradient(135deg,#1a1a2e,#e63946);border-radius:12px;padding:14px;color:#fff;display:flex;align-items:center;justify-content:space-between">
+            <div>
+              <div style="font-size:11px;opacity:.7;margin-bottom:2px">¿Necesitas servicio?</div>
+              <div style="font-weight:700;font-size:14px">Extintores Safety</div>
+              <div style="font-size:12px;opacity:.8">PBX: 444 75 71 · Bello</div>
+            </div>
+            <a href="tel:4447571" style="background:rgba(255,255,255,.2);color:#fff;padding:8px 14px;border-radius:8px;font-size:12px;font-weight:600;text-decoration:none">📞 Llamar</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div style="text-align:center;font-size:11px;color:#9090a0;padding:10px 0">
+        <div>Código QR generado por Safety CRM</div>
+        <div style="margin-top:4px">Este portal es de solo lectura · No requiere registro</div>
+      </div>
+      ` : `
+      <!-- Extintor no encontrado -->
+      <div style="background:#fff;border-radius:20px;padding:40px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.12)">
+        <div style="font-size:56px;margin-bottom:14px">🔍</div>
+        <div style="font-weight:700;font-size:18px;margin-bottom:8px">Extintor no encontrado</div>
+        <div style="font-size:13px;color:#888">El código QR puede estar desactualizado o el extintor fue eliminado del sistema.</div>
+        <div style="margin-top:20px;font-size:12px;color:#aaa">Contacta a Extintores Safety S.A.S<br>PBX: 444 75 71</div>
+      </div>
+      `}
+    </div>
+  </div>`;
+}
+
 // ── INIT ─────────────────────────────────────────────────────────────────────
 (function(){
+  // Detectar si viene de un QR
+  const params = new URLSearchParams(window.location.search);
+  const extId = params.get('e');
+  if(extId){
+    // Mostrar portal público sin login
+    showPortalQR(extId);
+    return;
+  }
+
   Object.keys(localStorage).forEach(k=>{ if(k.startsWith('safety_')||k.startsWith('scrm_')||k.startsWith('x_s_')) localStorage.removeItem(k) });
   ['clientes','extintores','recolecciones','entregas','laboratorio','materiales','visitas','alertas','prestamos','auditoria','usuarios'].forEach(t=>{ if(!C.get(t)) C.set(t,[]) });
   const s=C.get('session');
