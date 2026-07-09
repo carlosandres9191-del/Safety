@@ -585,12 +585,12 @@ function showCRMCompleto(){
   window.addEventListener('offline',onlineCheck);
   onlineCheck(); syncSt();
   APP.timer=setInterval(()=>{ if(navigator.onLine) syncNow() },30000);
-  goTo('dashboard');
+  goTo(u.rol==='mensajero'?'mensajero':'dashboard');
 }
 
 function buildSB(u,pn){
   const items=[
-    {pg:'dashboard',ic:'📊',lb:'Dashboard',r:['*']},
+    {pg:'dashboard',ic:'📊',lb:'Dashboard',r:['superadmin','coordinador','laboratorio','vendedor']},
     {sec:'OPERACIONES'},
     {pg:'recolecciones',ic:'📦',lb:'Recolecciones',r:['superadmin','coordinador','mensajero']},
     {pg:'entregas',ic:'🚚',lb:'Entregas',r:['superadmin','coordinador','mensajero']},
@@ -1142,141 +1142,466 @@ function togMat(id){ const m=DB.find('materiales',id); if(m){DB.save('materiales
 function delMat(id){ confirmSA('Eliminar material',()=>{DB.del('materiales',id);toast('Eliminado','success');goTo('materiales')}) }
 
 // ── MENSAJERO ──────────────────────────────────────────────────────────────
-function pgMens(c){
+async function pgMens(c){
   const u=APP.user;
+  c.innerHTML=`<div style="display:flex;align-items:center;justify-content:center;min-height:60vh;color:#484f58;font-size:13px;gap:12px;"><div style="width:20px;height:20px;border:2px solid rgba(255,255,255,.1);border-top-color:#C8281E;border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0;"></div> Cargando tus órdenes desde Supabase...</div>`;
+  // Siempre traer datos frescos de Supabase
+  try{
+    const [recs,ents,cls,exts]=await Promise.all([
+      sbGet('recolecciones',`&mensajeroId=eq.${u.id}`),
+      sbGet('entregas',`&mensajeroId=eq.${u.id}`),
+      sbGet('clientes'),
+      sbGet('extintores')
+    ]);
+    if(Array.isArray(recs)) C.set('recolecciones',[...DB.all('recolecciones').filter(r=>r.mensajeroId!==u.id),...recs]);
+    if(Array.isArray(ents)) C.set('entregas',[...DB.all('entregas').filter(e=>e.mensajeroId!==u.id),...ents]);
+    if(Array.isArray(cls))  C.set('clientes',cls);
+    if(Array.isArray(exts)) C.set('extintores',exts);
+  }catch(e){console.warn('pgMens sb:',e);}
+
   const rc=DB.all('recolecciones').filter(r=>r.mensajeroId===u.id&&r.estado!=='completada'&&r.estado!=='cancelada');
   const en=DB.all('entregas').filter(e=>e.mensajeroId===u.id&&e.estado!=='completada'&&e.estado!=='cancelada');
   const gpsOk=!!_gpsWatch;
-  c.innerHTML=`<div style="padding:16px;max-width:520px;margin:0 auto">
-  <div style="background:linear-gradient(135deg,#1a1a2e,#C8281E);color:#fff;border-radius:18px;padding:20px;margin-bottom:14px;box-shadow:0 8px 24px rgba(200,40,30,.3)">
-    <div style="font-weight:800;font-size:20px;margin-bottom:2px">¡Hola, ${u.nombre.split(' ')[0]}! 👋</div>
-    <div style="opacity:.7;font-size:12px">${fD(ts())}</div>
-    <div style="display:flex;gap:10px;margin-top:14px">
-      <div style="background:rgba(255,255,255,.15);border-radius:12px;padding:10px;text-align:center;flex:1"><div style="font-size:26px;font-weight:800">${rc.length}</div><div style="font-size:11px;opacity:.8">Recolecciones</div></div>
-      <div style="background:rgba(255,255,255,.15);border-radius:12px;padding:10px;text-align:center;flex:1"><div style="font-size:26px;font-weight:800">${en.length}</div><div style="font-size:11px;opacity:.8">Entregas</div></div>
+
+  c.innerHTML=`
+  <div style="min-height:100vh;background:#0d1117;padding:0;">
+    <!-- HEADER -->
+    <div style="background:linear-gradient(135deg,#0a0f14,#1a0a0a);border-bottom:1px solid rgba(200,40,30,.3);padding:14px 18px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div style="width:34px;height:34px;background:#C8281E;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px;">🧯</div>
+        <div>
+          <div style="font-size:14px;font-weight:700;color:#e6edf3;">${u.nombre.split(' ')[0]}</div>
+          <div style="font-size:11px;color:#484f58;">Mensajero · ${fD(ts())}</div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div style="display:flex;align-items:center;gap:5px;background:${gpsOk?'rgba(0,208,132,.1)':'rgba(248,81,73,.1)'};border:1px solid ${gpsOk?'rgba(0,208,132,.3)':'rgba(248,81,73,.3)'};border-radius:20px;padding:4px 10px;font-size:11px;font-weight:600;color:${gpsOk?'#00d084':'#f85149'};">
+          <div style="width:6px;height:6px;border-radius:50%;background:${gpsOk?'#00d084':'#f85149'};"></div>
+          ${gpsOk?'GPS activo':'GPS inactivo'}
+        </div>
+        ${!gpsOk?`<button onclick="mensajeroActivarGPS()" style="background:#C8281E;color:#fff;border:none;border-radius:7px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;">Activar</button>`:''}
+        <button onclick="pgMens(ge('pg'))" style="background:#1c2330;color:#8b949e;border:1px solid rgba(255,255,255,.1);border-radius:7px;padding:5px 10px;font-size:11px;cursor:pointer;">🔄</button>
+      </div>
     </div>
-    <div style="margin-top:12px;background:rgba(255,255,255,.1);border-radius:10px;padding:8px 14px;display:flex;align-items:center;justify-content:space-between">
-      <span style="font-size:11px;">${gpsOk?'🟢 GPS transmitiendo':'⚠️ GPS inactivo'}</span>
-      ${!gpsOk?`<button onclick="mensajeroActivarGPS()" style="background:rgba(255,255,255,.2);color:#fff;border:none;border-radius:7px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer">Activar GPS</button>`:''}
+
+    <!-- TABS -->
+    <div style="display:flex;border-bottom:1px solid rgba(255,255,255,.07);background:#0a0f14;padding:0 16px;">
+      <button onclick="mensTab('tab-rec-mens','tab-ent-mens',this)" id="tab-rec-mens-btn" style="flex:1;padding:12px 0;background:none;border:none;border-bottom:2px solid #C8281E;color:#e6edf3;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">
+        📦 Recolecciones <span style="background:rgba(200,40,30,.8);color:#fff;border-radius:20px;padding:1px 7px;font-size:10px;margin-left:3px;">${rc.length}</span>
+      </button>
+      <button onclick="mensTab('tab-ent-mens','tab-rec-mens',this)" id="tab-ent-mens-btn" style="flex:1;padding:12px 0;background:none;border:none;border-bottom:2px solid transparent;color:#484f58;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">
+        🚚 Entregas <span style="background:rgba(72,79,88,.6);color:#fff;border-radius:20px;padding:1px 7px;font-size:10px;margin-left:3px;">${en.length}</span>
+      </button>
+    </div>
+
+    <!-- TAB RECOLECCIONES -->
+    <div id="tab-rec-mens" style="padding:16px;">
+      ${rc.length?rc.map(r=>_cardRec(r)).join(''):`<div style="text-align:center;padding:60px 20px;color:#484f58;"><div style="font-size:48px;margin-bottom:12px;">📦</div><div style="font-size:14px;font-weight:600;color:#8b949e;margin-bottom:4px;">Sin recolecciones pendientes</div><div style="font-size:12px;">El coordinador te asignará órdenes próximamente</div></div>`}
+    </div>
+
+    <!-- TAB ENTREGAS -->
+    <div id="tab-ent-mens" style="padding:16px;display:none;">
+      ${en.length?en.map(e=>_cardEnt(e)).join(''):`<div style="text-align:center;padding:60px 20px;color:#484f58;"><div style="font-size:48px;margin-bottom:12px;">🚚</div><div style="font-size:14px;font-weight:600;color:#8b949e;margin-bottom:4px;">Sin entregas pendientes</div><div style="font-size:12px;">El coordinador te asignará entregas próximamente</div></div>`}
     </div>
   </div>
-  <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#8b949e;margin-bottom:8px;">📦 Mis Recolecciones</div>
-  ${rc.length?rc.map(r=>_cardRec(r)).join(''):`<div style="background:#161b22;border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:30px;text-align:center;margin-bottom:14px;color:#484f58"><div style="font-size:32px;margin-bottom:8px">📦</div><div style="font-size:13px;">Sin recolecciones asignadas</div></div>`}
-  <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#8b949e;margin-bottom:8px;margin-top:4px;">🚚 Mis Entregas</div>
-  ${en.length?en.map(e=>_cardEnt(e)).join(''):`<div style="background:#161b22;border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:30px;text-align:center;margin-bottom:14px;color:#484f58"><div style="font-size:32px;margin-bottom:8px">🚚</div><div style="font-size:13px;">Sin entregas asignadas</div></div>`}
-  </div>
-  <div class="ov" id="m-mens-rec"><div class="modal lg" style="max-height:90vh;overflow-y:auto;"><div class="mh"><span class="mt" id="m-mens-rec-t">Recolección</span><button class="mc btn" onclick="closeM('m-mens-rec')">✕</button></div><div class="mb" id="m-mens-rec-b"></div></div></div>
-  <div class="ov" id="m-mens-ent"><div class="modal lg" style="max-height:90vh;overflow-y:auto;"><div class="mh"><span class="mt" id="m-mens-ent-t">Entrega</span><button class="mc btn" onclick="closeM('m-mens-ent')">✕</button></div><div class="mb" id="m-mens-ent-b"></div></div></div>`;
+
+  <!-- MODALES -->
+  <div class="ov" id="m-mens-rec"><div class="modal lg" style="max-height:95vh;overflow-y:auto;">
+    <div class="mh"><span class="mt" id="m-mens-rec-t">Recolección</span><button class="mc btn" onclick="closeM('m-mens-rec')">✕</button></div>
+    <div class="mb" id="m-mens-rec-b"></div>
+  </div></div>
+  <div class="ov" id="m-conf-rec"><div class="modal lg" style="max-height:95vh;overflow-y:auto;">
+    <div class="mh"><span class="mt">✅ Vista previa — Confirmar</span><button class="mc btn" onclick="closeM('m-conf-rec')">✕</button></div>
+    <div class="mb" id="m-conf-rec-b"></div>
+  </div></div>
+  <div class="ov" id="m-firma-rec"><div class="modal lg" style="max-height:95vh;overflow-y:auto;">
+    <div class="mh"><span class="mt">✍️ Firma y confirmación</span><button class="mc btn" onclick="closeM('m-firma-rec')">✕</button></div>
+    <div class="mb" id="m-firma-rec-b"></div>
+  </div></div>
+  <div class="ov" id="m-mens-ent"><div class="modal lg" style="max-height:95vh;overflow-y:auto;">
+    <div class="mh"><span class="mt" id="m-mens-ent-t">Entrega</span><button class="mc btn" onclick="closeM('m-mens-ent')">✕</button></div>
+    <div class="mb" id="m-mens-ent-b"></div>
+  </div></div>`;
+}
+
+function mensTab(show,hide,btn){
+  const s=ge(show),h=ge(hide);
+  if(s) s.style.display='block';
+  if(h) h.style.display='none';
+  // Botones
+  const allBtns=document.querySelectorAll('[id$="-mens-btn"]');
+  allBtns.forEach(b=>{b.style.borderBottom='2px solid transparent';b.style.color='#484f58';});
+  if(btn){btn.style.borderBottom='2px solid #C8281E';btn.style.color='#e6edf3';}
 }
 
 function _cardRec(r){
   const cl=DB.find('clientes',r.clienteId)||{};
   const exts=(r.extintores||[]).map(id=>DB.find('extintores',id)).filter(Boolean);
-  const novBadge=r.novedad?`<div style="background:rgba(248,81,73,.1);border:1px solid rgba(248,81,73,.3);border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px;color:#f85149;">⚠️ <b>Novedad:</b> ${r.novedad} ${r.novedadAutorizada?'<span style="color:#00d084">✓ Autorizada</span>':'<span style="color:#f0883e">⏳ Pendiente autorización</span>'}</div>`:'';
-  return `<div style="background:#161b22;border:1px solid ${r.novedad&&!r.novedadAutorizada?'rgba(248,81,73,.4)':'rgba(255,255,255,.08)'};border-radius:14px;padding:16px;margin-bottom:12px;">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;"><div><div style="font-weight:700;font-size:15px;color:#e6edf3;">📦 ${cl.empresa||'Cliente'}</div><div style="font-size:11px;color:#8b949e;margin-top:2px;">📍 ${cl.direccion||'Sin dirección'}</div><div style="font-size:11px;color:#8b949e;">📞 ${cl.telefono||'—'} · 👤 ${cl.contacto||'—'}</div></div><div style="text-align:right;">${pB(r.prioridad)}<br><span style="font-size:10px;color:#484f58;">${fD(r.fechaProgramada)}</span></div></div>
-    ${novBadge}
-    <div style="background:#1c2330;border-radius:8px;padding:10px;margin-bottom:10px;font-size:12px;color:#8b949e;"><div style="font-weight:600;color:#e6edf3;margin-bottom:6px;">Extintores a recoger (${exts.length})</div>${exts.map(e=>`<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.05);"><span><b>${e.serial}</b> — ${e.tipo} ${e.capacidad||''}</span></div>`).join('')||'<span style="color:#484f58;">Sin extintores</span>'}</div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;">${cl.telefono?`<a href="tel:${cl.telefono}" class="btn btn-se btn-sm">📞 Llamar</a>`:''}${cl.lat&&cl.lng?`<button class="btn btn-se btn-sm" onclick="window.open('https://waze.com/ul?ll=${cl.lat},${cl.lng}&navigate=yes','_blank')">🗺️ Waze</button>`:''}${r.novedad&&!r.novedadAutorizada?'<span style="font-size:12px;color:#f0883e;padding:5px;margin-left:auto;">⏳ Esperando autorización...</span>':`<button class="btn btn-pr btn-sm" onclick="abrirFlujRec('${r.id}')" style="margin-left:auto;">📷 Registrar recolección →</button>`}</div>
+  const novBadge=r.novedad?`<div style="background:rgba(248,81,73,.1);border-left:3px solid #f85149;border-radius:6px;padding:8px 12px;margin-bottom:8px;font-size:12px;color:#f85149;">⚠️ ${r.novedad} ${r.novedadAutorizada?'<b style="color:#00d084">✓ Autorizada</b>':'<b style="color:#f0883e">⏳ Pendiente autorización</b>'}</div>`:'';
+  const bloqueado=r.novedad&&!r.novedadAutorizada;
+  return `<div style="background:#161b22;border:1px solid ${bloqueado?'rgba(248,81,73,.35)':'rgba(255,255,255,.08)'};border-radius:14px;margin-bottom:12px;overflow:hidden;">
+    <div style="padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.06);">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
+        <div><div style="font-size:16px;font-weight:700;color:#e6edf3;">📦 ${cl.empresa||'Cliente'}</div>
+        <div style="font-size:11px;color:#8b949e;margin-top:2px;">📍 ${cl.direccion||'Sin dirección'}</div></div>
+        <div style="text-align:right;flex-shrink:0;margin-left:8px;">${pB(r.prioridad)}<div style="font-size:10px;color:#484f58;margin-top:3px;">${fD(r.fechaProgramada)}</div></div>
+      </div>
+      <div style="font-size:11px;color:#8b949e;">👤 ${cl.contacto||'—'} · 📞 ${cl.telefono||'—'}</div>
+    </div>
+    <div style="padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.06);">
+      <div style="font-size:10px;font-weight:700;color:#484f58;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">Extintores a recoger (${exts.length})</div>
+      ${exts.map((e,i)=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04);">
+        <div style="width:22px;height:22px;background:rgba(200,40,30,.15);border:1px solid rgba(200,40,30,.3);border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#C8281E;flex-shrink:0;">${i+1}</div>
+        <div style="flex:1;"><span style="font-size:13px;font-weight:600;color:#e6edf3;">${e.serial}</span> <span style="font-size:11px;color:#8b949e;">— ${e.tipo||''} ${e.capacidad||''}</span></div>
+      </div>`).join('')||`<div style="color:#484f58;font-size:12px;">Sin extintores especificados</div>`}
+    </div>
+    ${novBadge?`<div style="padding:10px 16px;border-bottom:1px solid rgba(255,255,255,.06);">${novBadge}</div>`:''}
+    <div style="padding:12px 16px;display:flex;gap:8px;flex-wrap:wrap;">
+      ${cl.telefono?`<a href="tel:${cl.telefono}" class="btn btn-se btn-sm">📞 Llamar</a>`:''}
+      ${cl.lat&&cl.lng?`<button class="btn btn-se btn-sm" onclick="window.open('https://waze.com/ul?ll=${cl.lat},${cl.lng}&navigate=yes','_blank')">🗺️ Waze</button>`:''}
+      ${bloqueado?`<span style="font-size:12px;color:#f0883e;padding:5px;margin-left:auto;">⏳ Bloqueado — esperando autorización</span>`:`<button class="btn btn-pr btn-sm" onclick="abrirDetalleRec('${r.id}')" style="margin-left:auto;">📋 Abrir orden →</button>`}
+    </div>
   </div>`;
 }
 
 function _cardEnt(e){
   const cl=DB.find('clientes',e.clienteId)||{};
   const exts=(e.extintores||[]).map(id=>DB.find('extintores',id)).filter(Boolean);
-  return `<div style="background:#161b22;border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:16px;margin-bottom:12px;">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;"><div><div style="font-weight:700;font-size:15px;color:#e6edf3;">🚚 ${cl.empresa||'Cliente'}</div><div style="font-size:11px;color:#8b949e;margin-top:2px;">📍 ${cl.direccion||'Sin dirección'}</div><div style="font-size:11px;color:#8b949e;">📞 ${cl.telefono||'—'} · 👤 ${cl.contacto||'—'}</div></div><span style="font-size:10px;color:#484f58;">${fD(e.fechaProgramada)}</span></div>
-    <div style="background:#1c2330;border-radius:8px;padding:10px;margin-bottom:10px;font-size:12px;color:#8b949e;"><div style="font-weight:600;color:#e6edf3;margin-bottom:6px;">Extintores a entregar (${exts.length})</div>${exts.map(ex=>`<div style="padding:3px 0;border-bottom:1px solid rgba(255,255,255,.05);"><b>${ex.serial}</b> <span style="color:#8b949e;font-size:12px;">— ${ex.tipo} ${ex.capacidad||''}</span></div>`).join('')||'<span style="color:#484f58;">Sin extintores</span>'}</div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;">${cl.telefono?`<a href="tel:${cl.telefono}" class="btn btn-se btn-sm">📞 Llamar</a>`:''}${cl.lat&&cl.lng?`<button class="btn btn-se btn-sm" onclick="window.open('https://waze.com/ul?ll=${cl.lat},${cl.lng}&navigate=yes','_blank')">🗺️ Waze</button>`:''}<button class="btn btn-pr btn-sm" onclick="abrirFlujEnt('${e.id}')" style="margin-left:auto;">✅ Realizar entrega →</button></div>
+  return `<div style="background:#161b22;border:1px solid rgba(255,255,255,.08);border-radius:14px;margin-bottom:12px;overflow:hidden;">
+    <div style="padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.06);">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
+        <div><div style="font-size:16px;font-weight:700;color:#e6edf3;">🚚 ${cl.empresa||'Cliente'}</div>
+        <div style="font-size:11px;color:#8b949e;margin-top:2px;">📍 ${cl.direccion||'Sin dirección'}</div></div>
+        <div style="font-size:10px;color:#484f58;flex-shrink:0;margin-left:8px;">${fD(e.fechaProgramada)}</div>
+      </div>
+      <div style="font-size:11px;color:#8b949e;">👤 ${cl.contacto||'—'} · 📞 ${cl.telefono||'—'}</div>
+    </div>
+    <div style="padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.06);">
+      <div style="font-size:10px;font-weight:700;color:#484f58;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">Extintores a entregar (${exts.length})</div>
+      ${exts.map((ex,i)=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04);">
+        <div style="width:22px;height:22px;background:rgba(0,208,132,.1);border:1px solid rgba(0,208,132,.3);border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#00d084;flex-shrink:0;">${i+1}</div>
+        <div style="flex:1;"><span style="font-size:13px;font-weight:600;color:#e6edf3;">${ex.serial}</span> <span style="font-size:11px;color:#8b949e;">— ${ex.tipo||''} ${ex.capacidad||''}</span></div>
+      </div>`).join('')||`<div style="color:#484f58;font-size:12px;">Sin extintores</div>`}
+    </div>
+    <div style="padding:12px 16px;display:flex;gap:8px;flex-wrap:wrap;">
+      ${cl.telefono?`<a href="tel:${cl.telefono}" class="btn btn-se btn-sm">📞 Llamar</a>`:''}
+      ${cl.lat&&cl.lng?`<button class="btn btn-se btn-sm" onclick="window.open('https://waze.com/ul?ll=${cl.lat},${cl.lng}&navigate=yes','_blank')">🗺️ Waze</button>`:''}
+      <button class="btn btn-pr btn-sm" onclick="abrirFlujEnt('${e.id}')" style="margin-left:auto;">✅ Realizar entrega →</button>
+    </div>
   </div>`;
 }
 
-let _recFoto=null;
-function abrirFlujRec(id){
+// ── DETALLE ORDEN RECOLECCIÓN ─────────────────────────────────────────────
+let _recFotos=[],_recObs='',_recCants={};
+
+function abrirDetalleRec(id){
   const r=DB.find('recolecciones',id);if(!r)return;
   const cl=DB.find('clientes',r.clienteId)||{};
   const exts=(r.extintores||[]).map(i=>DB.find('extintores',i)).filter(Boolean);
-  _recFoto=null;
-  ge('m-mens-rec-t').textContent=`📦 Recolección — ${cl.empresa||''}`;
+  _recFotos=[];_recObs='';_recCants={};
+  exts.forEach(e=>{_recCants[e.id]=1;});
+  ge('m-mens-rec-t').textContent=`📦 ${cl.empresa||'Orden'}`;
   ge('m-mens-rec-b').innerHTML=`
-    <div style="margin-bottom:14px;background:#1c2330;border-radius:10px;padding:12px 16px;">
-      <div style="font-size:11px;color:#484f58;font-weight:700;text-transform:uppercase;margin-bottom:6px;">Extintores esperados (${exts.length}) — Ingresa cantidad recogida</div>
-      ${exts.map((e,i)=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.05);"><div><b style="color:#e6edf3;">${e.serial}</b> <span style="color:#8b949e;font-size:12px;">— ${e.tipo} ${e.capacidad||''}</span></div><div style="display:flex;align-items:center;gap:8px;"><span style="font-size:11px;color:#484f58;">Cant:</span><input type="number" min="0" max="99" value="1" id="cant-rec-${i}" style="width:58px;padding:5px 8px;border:1px solid rgba(255,255,255,.15);border-radius:6px;background:#0d1117;color:#e6edf3;font-size:13px;text-align:center;"></div></div>`).join('')||'<span style="color:#484f58;font-size:12px;">Sin extintores asignados</span>'}
+    <div style="background:#1c2330;border-radius:10px;padding:14px;margin-bottom:14px;">
+      <div style="font-size:11px;color:#484f58;font-weight:700;text-transform:uppercase;margin-bottom:8px;">Cliente</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <div><div style="font-size:10px;color:#484f58;">Empresa</div><div style="font-size:13px;font-weight:700;color:#e6edf3;">${cl.empresa||'—'}</div></div>
+        <div><div style="font-size:10px;color:#484f58;">Contacto</div><div style="font-size:13px;color:#e6edf3;">${cl.contacto||'—'}</div></div>
+        <div><div style="font-size:10px;color:#484f58;">Teléfono</div><div style="font-size:13px;color:#e6edf3;">${cl.telefono||'—'}</div></div>
+        <div><div style="font-size:10px;color:#484f58;">Dirección</div><div style="font-size:13px;color:#e6edf3;">${cl.direccion||'—'}</div></div>
+      </div>
+      ${cl.telefono||cl.lat?`<div style="display:flex;gap:8px;margin-top:10px;">${cl.telefono?`<a href="tel:${cl.telefono}" class="btn btn-se btn-sm">📞 Llamar</a>`:''} ${cl.lat&&cl.lng?`<button class="btn btn-se btn-sm" onclick="window.open('https://waze.com/ul?ll=${cl.lat},${cl.lng}&navigate=yes','_blank')">🗺️ Waze</button>`:''}</div>`:''}
     </div>
+
     <div style="margin-bottom:14px;">
-      <div style="font-size:11px;color:#484f58;font-weight:700;text-transform:uppercase;margin-bottom:8px;">📷 Foto de lo que recoges <span style="color:#C8281E">*</span></div>
-      <div id="rec-foto-prev" style="margin-bottom:8px;"></div>
-      <label style="display:flex;align-items:center;gap:10px;background:#1c2330;border:1px dashed rgba(255,255,255,.2);border-radius:10px;padding:14px;cursor:pointer;"><span style="font-size:24px;">📷</span><span style="font-size:13px;color:#8b949e;">Toca para tomar foto o seleccionar</span><input type="file" accept="image/*" capture="environment" style="display:none" onchange="prevRecFoto(this)"></label>
+      <div style="font-size:11px;color:#484f58;font-weight:700;text-transform:uppercase;margin-bottom:10px;">Inventario a recoger — ajusta la cantidad real</div>
+      ${exts.map((e,i)=>`
+      <div style="background:#1c2330;border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:12px 14px;margin-bottom:8px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+          <div style="flex:1;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">
+              <div style="width:22px;height:22px;background:#C8281E;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0;">${i+1}</div>
+              <span style="font-size:14px;font-weight:700;color:#e6edf3;">${e.serial}</span>
+            </div>
+            <div style="font-size:12px;color:#8b949e;margin-left:30px;">${e.tipo||''} ${e.capacidad||''} ${e.ubicacion?'· '+e.ubicacion:''}</div>
+          </div>
+          <div style="text-align:center;flex-shrink:0;">
+            <div style="font-size:10px;color:#484f58;margin-bottom:4px;">Cantidad</div>
+            <div style="display:flex;align-items:center;gap:5px;">
+              <button onclick="adjCant('${e.id}',-1)" style="width:28px;height:28px;background:#0d1117;border:1px solid rgba(255,255,255,.15);border-radius:6px;color:#e6edf3;font-size:18px;cursor:pointer;line-height:1;">−</button>
+              <input type="number" id="cant-${e.id}" value="1" min="0" max="99" style="width:46px;padding:4px;border:1px solid rgba(255,255,255,.15);border-radius:6px;background:#0d1117;color:#e6edf3;font-size:14px;font-weight:700;text-align:center;" oninput="_recCants['${e.id}']=parseInt(this.value)||0">
+              <button onclick="adjCant('${e.id}',1)" style="width:28px;height:28px;background:#0d1117;border:1px solid rgba(255,255,255,.15);border-radius:6px;color:#e6edf3;font-size:18px;cursor:pointer;line-height:1;">+</button>
+            </div>
+            <div style="font-size:10px;color:#484f58;margin-top:3px;">Esperado: 1</div>
+          </div>
+        </div>
+      </div>`).join('')||`<div style="color:#484f58;font-size:12px;padding:10px;text-align:center;">Sin extintores en esta orden</div>`}
     </div>
-    <div style="margin-bottom:14px;"><div style="font-size:11px;color:#484f58;font-weight:700;text-transform:uppercase;margin-bottom:6px;">Observaciones</div><textarea id="rec-obs-mens" class="fc" rows="2" placeholder="Comentarios sobre la recolección..."></textarea></div>
-    <div style="display:flex;gap:8px;justify-content:flex-end;"><button class="btn btn-se" onclick="closeM('m-mens-rec')">Cancelar</button><button class="btn btn-pr" onclick="finalizarRec('${id}',${exts.length},[${exts.map((_,i)=>i).join(',')}])">✅ Confirmar recolección</button></div>`;
+
+    <div style="margin-bottom:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <div style="font-size:11px;color:#484f58;font-weight:700;text-transform:uppercase;">📷 Fotos <span style="font-weight:400;color:#484f58;">(opcional)</span></div>
+        <span id="foto-cnt" style="font-size:10px;color:#484f58;">0 foto(s)</span>
+      </div>
+      <div id="fotos-prev" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;"></div>
+      <label style="display:flex;align-items:center;gap:10px;background:#1c2330;border:1px dashed rgba(255,255,255,.12);border-radius:10px;padding:12px;cursor:pointer;">
+        <span style="font-size:22px;">📷</span><span style="font-size:13px;color:#8b949e;">Toca para agregar foto</span>
+        <input type="file" accept="image/*" capture="environment" style="display:none" onchange="addFotoRec(this)">
+      </label>
+    </div>
+
+    <div style="margin-bottom:16px;">
+      <div style="font-size:11px;color:#484f58;font-weight:700;text-transform:uppercase;margin-bottom:6px;">Observaciones <span style="font-weight:400;">(opcional)</span></div>
+      <textarea id="rec-obs-txt" style="width:100%;padding:10px 12px;border:1px solid rgba(255,255,255,.1);border-radius:8px;background:#1c2330;color:#e6edf3;font-size:13px;font-family:inherit;resize:vertical;" rows="3" placeholder="Anota novedades, daños, condiciones especiales..."></textarea>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button class="btn btn-se" onclick="closeM('m-mens-rec')">Cancelar</button>
+      <button class="btn btn-pr" onclick="vistaProviaRec('${id}')">Continuar → Vista previa</button>
+    </div>`;
   openM('m-mens-rec');
 }
 
-function prevRecFoto(inp){
+function adjCant(extId,delta){
+  const inp=ge('cant-'+extId);if(!inp)return;
+  const v=Math.max(0,Math.min(99,(parseInt(inp.value)||0)+delta));
+  inp.value=v;_recCants[extId]=v;
+}
+
+function addFotoRec(inp){
   if(!inp.files||!inp.files[0])return;
-  const reader=new FileReader();
-  reader.onload=ev=>{_recFoto=ev.target.result;const prev=ge('rec-foto-prev');if(prev)prev.innerHTML=`<img src="${_recFoto}" style="width:100%;max-height:200px;object-fit:cover;border-radius:10px;border:1px solid rgba(255,255,255,.1);">`};
-  reader.readAsDataURL(inp.files[0]);
+  const r=new FileReader();
+  r.onload=ev=>{
+    _recFotos.push(ev.target.result);
+    const cnt=ge('foto-cnt');if(cnt)cnt.textContent=_recFotos.length+' foto(s)';
+    const prev=ge('fotos-prev');
+    if(prev){
+      const idx=_recFotos.length-1;
+      const d=document.createElement('div');d.style.cssText='position:relative;';
+      d.innerHTML=`<img src="${ev.target.result}" style="width:75px;height:75px;object-fit:cover;border-radius:8px;border:1px solid rgba(255,255,255,.1);">
+        <button onclick="delFotoRec(${idx},this.parentNode)" style="position:absolute;top:-5px;right:-5px;width:18px;height:18px;background:#f85149;border:none;border-radius:50%;color:#fff;font-size:10px;cursor:pointer;">✕</button>`;
+      prev.appendChild(d);
+    }
+  };
+  r.readAsDataURL(inp.files[0]);
+  inp.value='';
 }
 
-function finalizarRec(id,totalExts,idxs){
-  if(!_recFoto){toast('Debes tomar una foto de lo que recoges','error');return;}
+function delFotoRec(idx,el){_recFotos.splice(idx,1);if(el)el.remove();const cnt=ge('foto-cnt');if(cnt)cnt.textContent=_recFotos.length+' foto(s)';}
+
+// ── VISTA PREVIA RECOLECCIÓN ──────────────────────────────────────────────
+let _recExtsConf=[], _recHayNov=false;
+
+function vistaProviaRec(id){
   const r=DB.find('recolecciones',id);if(!r)return;
-  let totalIngresado=0;
-  for(const i of idxs){const el=ge('cant-rec-'+i);if(el)totalIngresado+=parseInt(el.value)||0;}
-  const obs=ge('rec-obs-mens')?.value?.trim()||'';
-  if(totalIngresado!==totalExts){
-    const diff=totalExts-totalIngresado;
-    const msg=diff>0?`Faltan ${diff} extintor(es) de los ${totalExts} esperados.`:`Se están recogiendo ${Math.abs(diff)} extintor(es) de más.`;
-    const novedad=`${msg} Esperado: ${totalExts}, Recogido: ${totalIngresado}. Obs: ${obs||'—'}`;
-    DB.save('recolecciones',{...r,novedad,novedadAutorizada:false,fotoRecoleccion:_recFoto,estado:'novedad'});
-    DB.save('alertas',{tipo:'novedad_recoleccion',mensaje:`⚠️ NOVEDAD recolección ${DB.find('clientes',r.clienteId)?.empresa||''}: ${msg} Mensajero: ${APP.user.nombre}`,usuarioDestino:'coordinador',leida:false});
-    toast('⚠️ Novedad registrada. Esperando autorización del coordinador.','error');
-    closeM('m-mens-rec');goTo('mensajero');return;
-  }
-  DB.save('recolecciones',{...r,estado:'completada',fotoRecoleccion:_recFoto,observaciones:obs,cantidadRecogida:totalIngresado,novedad:null,novedadAutorizada:null});
-  toast('✅ Recolección completada con éxito','success');
-  closeM('m-mens-rec');goTo('mensajero');
+  const cl=DB.find('clientes',r.clienteId)||{};
+  const exts=(r.extintores||[]).map(i=>DB.find('extintores',i)).filter(Boolean);
+  _recObs=ge('rec-obs-txt')?.value?.trim()||'';
+
+  // Leer cantidades actuales
+  let hayNov=false;
+  _recExtsConf=exts.map((e,i)=>{
+    const inp=ge('cant-'+e.id);
+    const cant=inp?parseInt(inp.value)||0:(_recCants[e.id]||0);
+    _recCants[e.id]=cant;
+    if(cant!==1) hayNov=true;
+    return {...e,cantRecogida:cant};
+  });
+  _recHayNov=hayNov;
+  closeM('m-mens-rec');
+
+  ge('m-conf-rec-b').innerHTML=`
+    <div style="background:${hayNov?'rgba(240,136,62,.1)':'rgba(0,208,132,.08)'};border:1px solid ${hayNov?'rgba(240,136,62,.3)':'rgba(0,208,132,.2)'};border-radius:10px;padding:14px;margin-bottom:14px;text-align:center;">
+      <div style="font-size:24px;margin-bottom:6px;">${hayNov?'⚠️':'✅'}</div>
+      <div style="font-size:14px;font-weight:700;color:${hayNov?'#f0883e':'#00d084'};">${hayNov?'Diferencia en cantidades detectada':'Inventario conforme'}</div>
+      <div style="font-size:12px;color:#8b949e;margin-top:3px;">${hayNov?'Se notificará al coordinador para autorización':'Todo coincide con la orden asignada'}</div>
+    </div>
+
+    <div style="font-size:11px;color:#484f58;font-weight:700;text-transform:uppercase;margin-bottom:10px;">Inventario recolectado</div>
+    ${_recExtsConf.map((e,i)=>`
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:#1c2330;border-radius:8px;margin-bottom:6px;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div style="width:22px;height:22px;background:${e.cantRecogida===1?'rgba(0,208,132,.15)':'rgba(240,136,62,.15)'};border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:${e.cantRecogida===1?'#00d084':'#f0883e'};">${i+1}</div>
+        <div><div style="font-size:13px;font-weight:600;color:#e6edf3;">${e.serial}</div><div style="font-size:11px;color:#8b949e;">${e.tipo||''} ${e.capacidad||''}</div></div>
+      </div>
+      <div style="text-align:right;">
+        <div style="font-size:16px;font-weight:700;color:${e.cantRecogida===1?'#00d084':'#f0883e'};">${e.cantRecogida}</div>
+        <div style="font-size:10px;color:#484f58;">unid. recogidas</div>
+      </div>
+    </div>`).join('')}
+
+    ${_recFotos.length?`<div style="margin-top:12px;margin-bottom:12px;">
+      <div style="font-size:11px;color:#484f58;font-weight:700;text-transform:uppercase;margin-bottom:8px;">Fotos adjuntas (${_recFotos.length})</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">${_recFotos.map(f=>`<img src="${f}" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid rgba(255,255,255,.1);">`).join('')}</div>
+    </div>`:''}
+
+    ${_recObs?`<div style="background:#1c2330;border-radius:8px;padding:12px;margin-bottom:12px;">
+      <div style="font-size:10px;color:#484f58;font-weight:700;text-transform:uppercase;margin-bottom:4px;">Observaciones</div>
+      <div style="font-size:13px;color:#8b949e;">${_recObs}</div>
+    </div>`:''}
+
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button class="btn btn-se" onclick="closeM('m-conf-rec');openM('m-mens-rec')">← Editar</button>
+      <button class="btn btn-pr" onclick="abrirFirmaRec('${id}')">Continuar → Firma del cliente</button>
+    </div>`;
+  openM('m-conf-rec');
 }
 
+// ── FIRMA + CORREO RECOLECCIÓN ────────────────────────────────────────────
+let _iDRec=false,_lxRec=0,_lyRec=0;
+
+function abrirFirmaRec(id){
+  const r=DB.find('recolecciones',id);if(!r)return;
+  const cl=DB.find('clientes',r.clienteId)||{};
+  closeM('m-conf-rec');
+  ge('m-firma-rec-b').innerHTML=`
+    <div style="background:#1c2330;border-radius:10px;padding:12px 14px;margin-bottom:14px;">
+      <div style="font-size:11px;color:#484f58;margin-bottom:3px;">Recolección para</div>
+      <div style="font-size:15px;font-weight:700;color:#e6edf3;">${cl.empresa||'—'}</div>
+      <div style="font-size:12px;color:#8b949e;">${_recExtsConf.length} extintor(es) · ${fD(ts())}</div>
+    </div>
+    <div style="margin-bottom:14px;">
+      <div style="font-size:11px;color:#484f58;font-weight:700;text-transform:uppercase;margin-bottom:8px;">✍️ Firma del cliente <span style="color:#C8281E">*</span></div>
+      <div style="background:#fff;border-radius:10px;padding:3px;">
+        <canvas id="firma-rec-cv" width="460" height="150" style="border-radius:8px;cursor:crosshair;width:100%;display:block;touch-action:none;"></canvas>
+      </div>
+      <button class="btn btn-se btn-sm" onclick="limpFirmaRec()" style="margin-top:6px;">🗑️ Limpiar</button>
+    </div>
+    <div style="margin-bottom:16px;">
+      <div style="font-size:11px;color:#484f58;font-weight:700;text-transform:uppercase;margin-bottom:6px;">📧 Correo del cliente <span style="color:#C8281E">*</span></div>
+      <input type="email" id="rec-email-cl" value="${cl.email||''}" placeholder="correo@empresa.com" style="width:100%;padding:10px 12px;border:1px solid rgba(255,255,255,.12);border-radius:8px;background:#1c2330;color:#e6edf3;font-size:13px;font-family:inherit;">
+      <div style="font-size:11px;color:#484f58;margin-top:4px;">Recibirá el inventario recolectado y la firma como confirmación</div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button class="btn btn-se" onclick="closeM('m-firma-rec');openM('m-conf-rec')">← Volver</button>
+      <button class="btn btn-pr" id="btn-finalizar-rec" onclick="finalizarRecConFirma('${id}')">✅ Recolectado — Enviar confirmación</button>
+    </div>`;
+  openM('m-firma-rec');
+  setTimeout(()=>initFirmaRec(),300);
+}
+
+function initFirmaRec(){
+  const cv=ge('firma-rec-cv');if(!cv)return;
+  const ctx=cv.getContext('2d');ctx.strokeStyle='#111';ctx.lineWidth=2.5;ctx.lineCap='round';ctx.lineJoin='round';
+  const pos=ev=>{const r=cv.getBoundingClientRect(),sx=cv.width/r.width,sy=cv.height/r.height;
+    return ev.touches?{x:(ev.touches[0].clientX-r.left)*sx,y:(ev.touches[0].clientY-r.top)*sy}:{x:(ev.clientX-r.left)*sx,y:(ev.clientY-r.top)*sy}};
+  cv.onmousedown=ev=>{_iDRec=true;const p=pos(ev);_lxRec=p.x;_lyRec=p.y};
+  cv.onmousemove=ev=>{if(!_iDRec)return;const p=pos(ev);ctx.beginPath();ctx.moveTo(_lxRec,_lyRec);ctx.lineTo(p.x,p.y);ctx.stroke();_lxRec=p.x;_lyRec=p.y};
+  cv.onmouseup=()=>_iDRec=false;
+  cv.addEventListener('touchstart',ev=>{ev.preventDefault();_iDRec=true;const p=pos(ev);_lxRec=p.x;_lyRec=p.y},{passive:false});
+  cv.addEventListener('touchmove',ev=>{ev.preventDefault();if(!_iDRec)return;const p=pos(ev);ctx.beginPath();ctx.moveTo(_lxRec,_lyRec);ctx.lineTo(p.x,p.y);ctx.stroke();_lxRec=p.x;_lyRec=p.y},{passive:false});
+  cv.addEventListener('touchend',()=>_iDRec=false);
+}
+function limpFirmaRec(){const cv=ge('firma-rec-cv');if(cv)cv.getContext('2d').clearRect(0,0,cv.width,cv.height);}
+
+async function finalizarRecConFirma(id){
+  const cv=ge('firma-rec-cv');if(!cv){toast('Error','error');return;}
+  const px=cv.getContext('2d').getImageData(0,0,cv.width,cv.height).data;
+  if(!px.some((v,i)=>i%4===3&&v>0)){toast('El cliente debe firmar para continuar','error');return;}
+  const email=ge('rec-email-cl')?.value?.trim()||'';
+  if(!email){toast('Ingresa el correo del cliente','error');return;}
+
+  const btn=ge('btn-finalizar-rec');
+  if(btn){btn.textContent='Guardando en Supabase...';btn.disabled=true;}
+
+  const firma=cv.toDataURL();
+  const r=DB.find('recolecciones',id);if(!r)return;
+  const cl=DB.find('clientes',r.clienteId)||{};
+
+  // Construir datos para Supabase
+  const datosGuardar={
+    ...r,
+    estado: _recHayNov?'novedad':'completada',
+    firmaCliente: firma,
+    fotoRecoleccion: _recFotos[0]||null,
+    observaciones: _recObs||null,
+    cantidades: JSON.stringify(_recExtsConf.map(e=>({serial:e.serial,tipo:e.tipo,capacidad:e.capacidad||'',cantRecogida:e.cantRecogida}))),
+    correoCliente: email,
+    fechaRecoleccion: new Date().toISOString(),
+    mensajeroNombre: APP.user.nombre
+  };
+
+  if(_recHayNov){
+    const diffs=_recExtsConf.filter(e=>e.cantRecogida!==1).map(e=>`${e.serial}: esperado 1, recogido ${e.cantRecogida}`).join('; ');
+    datosGuardar.novedad=`Diferencia en cantidades: ${diffs}`;
+    datosGuardar.novedadAutorizada=false;
+    // Alerta para coordinador en Supabase
+    DB.save('alertas',{
+      tipo:'novedad_recoleccion',
+      mensaje:`⚠️ NOVEDAD recolección ${cl.empresa||''}: ${diffs} — Mensajero: ${APP.user.nombre}`,
+      usuarioDestino:'coordinador',
+      leida:false
+    });
+  }
+
+  // Guardar en Supabase via DB.save (guarda local + envía a Supabase)
+  DB.save('recolecciones', datosGuardar);
+
+  // Enviar correo — fallback a mailto
+  try{
+    const inventarioTexto=_recExtsConf.map(e=>`• ${e.serial} — ${e.tipo||''} ${e.capacidad||''}: ${e.cantRecogida} unid.`).join('\n');
+    const asunto=encodeURIComponent(`Confirmación recolección extintores — ${cl.empresa||''}`);
+    const cuerpo=encodeURIComponent(`Estimado cliente,\n\nExtintores Safety S.A.S realizó la recolección el ${new Date().toLocaleDateString('es-CO')}.\n\nInventario recolectado:\n${inventarioTexto}\n${_recObs?'\nObservaciones: '+_recObs:''}\n\nMensajero: ${APP.user.nombre}\n\nGracias por su confianza.\nExtintores Safety S.A.S\nPBX: 444 75 71`);
+    window.open(`mailto:${email}?subject=${asunto}&body=${cuerpo}`,'_blank');
+    toast(`✅ Guardado en Supabase. Se abrió el correo para ${email}`,'success');
+  }catch(err){
+    toast('✅ Recolección guardada en Supabase','success');
+  }
+
+  _recFotos=[];_recExtsConf=[];_recHayNov=false;_recObs='';_recCants={};
+  closeM('m-firma-rec');
+  // Refrescar vista
+  setTimeout(()=>pgMens(ge('pg')),500);
+}
+
+// ── ENTREGA ───────────────────────────────────────────────────────────────
 let _entFoto=null,_iDEnt=false,_lxEnt=0,_lyEnt=0;
 function abrirFlujEnt(id){
   const e=DB.find('entregas',id);if(!e)return;
   const cl=DB.find('clientes',e.clienteId)||{};
   const exts=(e.extintores||[]).map(i=>DB.find('extintores',i)).filter(Boolean);
   _entFoto=null;
-  ge('m-mens-ent-t').textContent=`🚚 Entrega — ${cl.empresa||''}`;
+  ge('m-mens-ent-t').textContent=`🚚 ${cl.empresa||'Entrega'}`;
   ge('m-mens-ent-b').innerHTML=`
-    <div style="margin-bottom:14px;background:#1c2330;border-radius:10px;padding:12px 16px;">
-      <div style="font-size:11px;color:#484f58;font-weight:700;text-transform:uppercase;margin-bottom:6px;">Extintores a entregar (${exts.length})</div>
-      ${exts.map(ex=>`<div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,.05);"><b style="color:#e6edf3;">${ex.serial}</b> <span style="color:#8b949e;font-size:12px;">— ${ex.tipo} ${ex.capacidad||''}</span></div>`).join('')||'<span style="color:#484f58;font-size:12px;">Sin extintores</span>'}
+    <div style="background:#1c2330;border-radius:10px;padding:14px;margin-bottom:14px;">
+      <div style="font-size:10px;color:#484f58;font-weight:700;text-transform:uppercase;margin-bottom:8px;">Extintores a entregar (${exts.length})</div>
+      ${exts.map((ex,i)=>`<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.04);">
+        <div style="width:22px;height:22px;background:rgba(0,208,132,.15);border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#00d084;">${i+1}</div>
+        <div><div style="font-size:13px;font-weight:600;color:#e6edf3;">${ex.serial}</div><div style="font-size:11px;color:#8b949e;">${ex.tipo||''} ${ex.capacidad||''}</div></div>
+      </div>`).join('')||`<div style="color:#484f58;font-size:12px;">Sin extintores</div>`}
     </div>
     <div style="margin-bottom:14px;">
       <div style="font-size:11px;color:#484f58;font-weight:700;text-transform:uppercase;margin-bottom:8px;">✍️ Firma del cliente <span style="color:#C8281E">*</span></div>
-      <canvas id="firma-ent" width="460" height="130" style="border:2px solid rgba(255,255,255,.15);border-radius:10px;background:#fff;cursor:crosshair;width:100%;touch-action:none;display:block;"></canvas>
+      <div style="background:#fff;border-radius:10px;padding:3px;">
+        <canvas id="firma-ent" width="460" height="130" style="border-radius:8px;cursor:crosshair;width:100%;display:block;touch-action:none;"></canvas>
+      </div>
       <button class="btn btn-se btn-sm" onclick="limpFirmaEnt()" style="margin-top:6px;">🗑️ Limpiar firma</button>
     </div>
     <div style="margin-bottom:14px;">
-      <div style="font-size:11px;color:#484f58;font-weight:700;text-transform:uppercase;margin-bottom:8px;">📷 Foto de lo entregado (opcional)</div>
+      <div style="font-size:11px;color:#484f58;font-weight:700;text-transform:uppercase;margin-bottom:6px;">📷 Foto <span style="font-weight:400;">(opcional)</span></div>
       <div id="ent-foto-prev" style="margin-bottom:8px;"></div>
-      <label style="display:flex;align-items:center;gap:10px;background:#1c2330;border:1px dashed rgba(255,255,255,.2);border-radius:10px;padding:12px;cursor:pointer;"><span style="font-size:22px;">📷</span><span style="font-size:13px;color:#8b949e;">Toca para tomar foto</span><input type="file" accept="image/*" capture="environment" style="display:none" onchange="prevEntFoto(this)"></label>
+      <label style="display:flex;align-items:center;gap:10px;background:#1c2330;border:1px dashed rgba(255,255,255,.12);border-radius:10px;padding:12px;cursor:pointer;">
+        <span style="font-size:22px;">📷</span><span style="font-size:13px;color:#8b949e;">Toca para tomar foto</span>
+        <input type="file" accept="image/*" capture="environment" style="display:none" onchange="prevEntFoto(this)">
+      </label>
     </div>
-    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px;"><button class="btn btn-se" onclick="closeM('m-mens-ent')">Cancelar</button><button class="btn btn-pr" onclick="finalizarEnt('${id}')">✅ Finalizar entrega</button></div>`;
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button class="btn btn-se" onclick="closeM('m-mens-ent')">Cancelar</button>
+      <button class="btn btn-pr" onclick="finalizarEnt('${id}')">✅ Finalizar entrega</button>
+    </div>`;
   openM('m-mens-ent');setTimeout(()=>initFirmaEnt(),300);
 }
 
 function prevEntFoto(inp){
   if(!inp.files||!inp.files[0])return;
-  const reader=new FileReader();
-  reader.onload=ev=>{_entFoto=ev.target.result;const prev=ge('ent-foto-prev');if(prev)prev.innerHTML=`<img src="${_entFoto}" style="width:100%;max-height:160px;object-fit:cover;border-radius:10px;border:1px solid rgba(255,255,255,.1);">`};
-  reader.readAsDataURL(inp.files[0]);
+  const r=new FileReader();
+  r.onload=ev=>{_entFoto=ev.target.result;const p=ge('ent-foto-prev');if(p)p.innerHTML=`<img src="${ev.target.result}" style="width:100%;max-height:160px;object-fit:cover;border-radius:10px;">`};
+  r.readAsDataURL(inp.files[0]);
 }
-
 function initFirmaEnt(){
   const cv=ge('firma-ent');if(!cv)return;
-  const ctx=cv.getContext('2d');ctx.strokeStyle='#1a1a2e';ctx.lineWidth=2.5;ctx.lineCap='round';
-  const pos=ev=>{const r=cv.getBoundingClientRect(),sx=cv.width/r.width,sy=cv.height/r.height;return ev.touches?{x:(ev.touches[0].clientX-r.left)*sx,y:(ev.touches[0].clientY-r.top)*sy}:{x:(ev.clientX-r.left)*sx,y:(ev.clientY-r.top)*sy}};
+  const ctx=cv.getContext('2d');ctx.strokeStyle='#111';ctx.lineWidth=2.5;ctx.lineCap='round';ctx.lineJoin='round';
+  const pos=ev=>{const r=cv.getBoundingClientRect(),sx=cv.width/r.width,sy=cv.height/r.height;
+    return ev.touches?{x:(ev.touches[0].clientX-r.left)*sx,y:(ev.touches[0].clientY-r.top)*sy}:{x:(ev.clientX-r.left)*sx,y:(ev.clientY-r.top)*sy}};
   cv.onmousedown=ev=>{_iDEnt=true;const p=pos(ev);_lxEnt=p.x;_lyEnt=p.y};
   cv.onmousemove=ev=>{if(!_iDEnt)return;const p=pos(ev);ctx.beginPath();ctx.moveTo(_lxEnt,_lyEnt);ctx.lineTo(p.x,p.y);ctx.stroke();_lxEnt=p.x;_lyEnt=p.y};
   cv.onmouseup=()=>_iDEnt=false;
@@ -1287,31 +1612,24 @@ function initFirmaEnt(){
 function limpFirmaEnt(){const cv=ge('firma-ent');if(cv)cv.getContext('2d').clearRect(0,0,cv.width,cv.height);}
 
 function finalizarEnt(id){
-  const cv=ge('firma-ent');if(!cv){toast('Error al obtener firma','error');return;}
-  const ctx=cv.getContext('2d');
-  const px=ctx.getImageData(0,0,cv.width,cv.height).data;
-  const signed=px.some((v,i)=>i%4===3&&v>0);
-  if(!signed){toast('El cliente debe firmar antes de continuar','error');return;}
-  const firma=cv.toDataURL();
+  const cv=ge('firma-ent');if(!cv){toast('Error','error');return;}
+  const px=cv.getContext('2d').getImageData(0,0,cv.width,cv.height).data;
+  if(!px.some((v,i)=>i%4===3&&v>0)){toast('El cliente debe firmar','error');return;}
   const e=DB.find('entregas',id);if(!e)return;
-  DB.save('entregas',{...e,estado:'completada',firmaCliente:firma,fotoEntrega:_entFoto||null});
-  toast('✅ Entrega completada con firma del cliente','success');
-  _entFoto=null;closeM('m-mens-ent');goTo('mensajero');
+  DB.save('entregas',{...e,estado:'completada',firmaCliente:cv.toDataURL(),fotoEntrega:_entFoto||null,fechaEntrega:new Date().toISOString(),mensajeroNombre:APP.user.nombre});
+  toast('✅ Entrega completada con firma — guardado en Supabase','success');
+  _entFoto=null;closeM('m-mens-ent');
+  setTimeout(()=>pgMens(ge('pg')),500);
 }
 
-function confRec(id){DB.save('recolecciones',{...DB.find('recolecciones',id),estado:'completada'});toast('Confirmado ✓','success');goTo('mensajero');}
-
-function activarGPSManual(){
-  if(!_gpsWatch){mensajeroActivarGPS();}else{toast('GPS ya está activo','info');}
-}
-
+function confRec(id){DB.save('recolecciones',{...DB.find('recolecciones',id),estado:'completada'});toast('Confirmado','success');pgMens(ge('pg'));}
+function activarGPSManual(){if(!_gpsWatch)mensajeroActivarGPS();else toast('GPS ya activo','info');}
 function autorizarNovedad(recId){
-  if(!isC()){toast('Solo coordinadores pueden autorizar novedades','error');return;}
+  if(!isC()){toast('Solo coordinadores','error');return;}
   const r=DB.find('recolecciones',recId);if(!r)return;
   DB.save('recolecciones',{...r,novedadAutorizada:true,estado:'completada'});
   DB.all('alertas').filter(a=>a.tipo==='novedad_recoleccion'&&!a.leida).forEach(a=>DB.save('alertas',{...a,leida:true}));
-  toast('✅ Novedad autorizada. Recolección completada.','success');
-  goTo('recolecciones');
+  toast('✅ Novedad autorizada','success');goTo('recolecciones');
 }
 
 
