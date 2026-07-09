@@ -330,10 +330,34 @@ function logA(ac,mod){ if(!APP.user)return; DB.save('auditoria',{usuarioId:APP.u
 
 function confirmSA(msg,cb){
   const ov=document.createElement('div'); ov.className='ov open'; ov.style.zIndex='9999';
+
+  // Si ya es coordinador o superadmin — solo pedir confirmación simple
+  if(isC()){
+    ov.innerHTML=`<div class="modal sm">
+      <div class="mh"><span class="mt">⚠️ Confirmar acción</span></div>
+      <div class="mb">
+        <div style="text-align:center;padding:10px 0 18px;">
+          <div style="font-size:38px;margin-bottom:12px;">🗑️</div>
+          <div style="font-size:14px;font-weight:600;color:var(--ink1);margin-bottom:6px;">${msg}</div>
+          <div style="font-size:12px;color:var(--ink3);">Esta acción no se puede deshacer.</div>
+        </div>
+      </div>
+      <div class="mf">
+        <button class="btn btn-se" id="_sc">Cancelar</button>
+        <button class="btn btn-da" id="_sok">Sí, eliminar</button>
+      </div>
+    </div>`;
+    document.body.appendChild(ov);
+    ge('_sc').onclick=()=>ov.remove();
+    ge('_sok').onclick=()=>{ ov.remove(); cb(); };
+    return;
+  }
+
+  // Si no es coordinador/superadmin — pedir credenciales
   ov.innerHTML=`<div class="modal sm"><div class="mh"><span class="mt">🔐 Acción protegida</span></div><div class="mb"><div class="al al-r" style="margin-bottom:14px;">⚠️ ${msg}</div><div class="fg"><label>Correo superadmin</label><input class="fc" id="_sae" type="email" placeholder="admin@empresa.com"></div><div class="fg"><label>Contraseña</label><input class="fc" id="_sap" type="password" placeholder="••••••••"></div><div id="_serr" style="color:var(--red);font-size:12px;display:none;">❌ Credenciales incorrectas</div></div><div class="mf"><button class="btn btn-se" id="_sc">Cancelar</button><button class="btn btn-pr" style="background:var(--red-d);" id="_sok">Confirmar</button></div></div>`;
   document.body.appendChild(ov);
-  ge('_sc').onclick = ()=>ov.remove();
-  ge('_sok').onclick = async()=>{
+  ge('_sc').onclick=()=>ov.remove();
+  ge('_sok').onclick=async()=>{
     const email=ge('_sae').value.trim().toLowerCase(), pass=ge('_sap').value.trim();
     const lista=await sbGet('usuarios','&rol=eq.superadmin')||DB.all('usuarios').filter(u=>u.rol==='superadmin');
     const ok=lista.find(u=>(u.email||'').toLowerCase()===email&&String(u.password||u.contrasena||'').trim()===pass);
