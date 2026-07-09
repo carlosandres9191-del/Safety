@@ -954,7 +954,26 @@ function pgRec(c){
   c.innerHTML=`<div style="padding:28px">
   <div class="ph"><div><div class="ph-t">📦 Recolecciones</div><div class="ph-s">${rc.filter(r=>r.estado==='pendiente').length} pendientes de ${rc.length}</div></div><div class="ph-a"><select class="fc" style="width:auto" onchange="fAttr('t-rc','data-est',this.value)"><option value="">Todos</option><option value="pendiente">⏳ Pendiente</option><option value="en_camino">🚗 En camino</option><option value="novedad">⚠️ Novedad</option><option value="recolectado">✅ Recolectado</option><option value="completada">✅ Completada</option><option value="cancelada">❌ Cancelada</option></select>${isC()?`<button class="btn btn-pr" onclick="mRec()">+ Nueva orden</button>`:''}</div></div>
   <div class="card"><div class="tw"><table id="t-rc"><thead><tr><th>Cliente</th><th>Mensajero</th><th>Estado</th><th>Prioridad</th><th>Fecha</th><th>Acciones</th></tr></thead><tbody>
-  ${rc.map(r=>{const m=DB.find('usuarios',r.mensajeroId);return`<tr data-est="${r.estado}"><td><b>${cN(r.clienteId)}</b></td><td>${m?m.nombre:'<span style="color:var(--red);font-size:12px;font-weight:600">Sin asignar</span>'}</td><td>${oB(r.estado)}</td><td>${pB(r.prioridad)}</td><td>${fD(r.fechaProgramada)}</td><td><div style="display:flex;gap:4px">${isC()?`<button class="btn btn-se btn-sm" onclick="asignarMens('${r.id}','rec')">👤 Asignar</button><button class="btn btn-ou btn-sm" onclick="chgRec('${r.id}')">🔄</button>${r.novedad&&!r.novedadAutorizada?`<button class="btn btn-pr btn-sm" style="background:#f0883e;border-color:#f0883e;" onclick="autorizarNovedad('${r.id}')">⚠️ Autorizar novedad</button>`:''}<button class="btn btn-da btn-sm" onclick="delRec('${r.id}')">🗑️</button>`:''}</div></td></tr>`}).join('')||'<tr><td colspan="6"><div class="empty"><div class="empty-ic">📦</div><div class="empty-t">Sin recolecciones</div></div></td></tr>'}
+  ${rc.map(r=>{
+    const m=DB.find('usuarios',r.mensajeroId);
+    const finalizada=r.estado==='recolectado'||r.estado==='completada';
+    return`<tr data-est="${r.estado}">
+      <td><b>${cN(r.clienteId)}</b></td>
+      <td>${m?m.nombre:'<span style="color:var(--red);font-size:12px;font-weight:600">Sin asignar</span>'}</td>
+      <td>${oB(r.estado)}</td>
+      <td>${pB(r.prioridad)}</td>
+      <td>${fD(r.fechaProgramada)}</td>
+      <td><div style="display:flex;gap:4px;flex-wrap:wrap">
+        ${isC()?`
+          ${!finalizada?`<button class="btn btn-se btn-sm" onclick="asignarMens('${r.id}','rec')">👤 Asignar</button>`:''}
+          ${finalizada?`<button class="btn btn-pr btn-sm" style="background:#52b788;" onclick="abrirVerificacionRec('${r.id}')">📋 Verificar ingreso →</button>`:
+            r.novedad&&!r.novedadAutorizada?`<button class="btn btn-pr btn-sm" style="background:#f0883e;border-color:#f0883e;" onclick="autorizarNovedad('${r.id}')">⚠️ Autorizar novedad</button>`:''}
+          ${!finalizada?`<button class="btn btn-ou btn-sm" onclick="chgRec('${r.id}')">🔄</button>`:''}
+          <button class="btn btn-da btn-sm" onclick="delRec('${r.id}')">🗑️</button>
+        `:''}
+      </div></td>
+    </tr>`
+  }).join('')||'<tr><td colspan="6"><div class="empty"><div class="empty-ic">📦</div><div class="empty-t">Sin recolecciones</div></div></td></tr>'}
   </tbody></table></div></div>
   <div class="ov" id="m-rec"><div class="modal lg" style="max-height:93vh;overflow-y:auto;"><div class="mh"><span class="mt">📦 Nueva Recolección</span><button class="mc btn" onclick="closeM('m-rec')">✕</button></div><div class="mb">
 
@@ -2021,6 +2040,233 @@ function marcarEnCamino(id,tipo){
   pgMens(ge('pg'));
 }
 function activarGPSManual(){if(!_gpsWatch)mensajeroActivarGPS();else toast('GPS ya activo','info');}
+// ── VERIFICACIÓN DE INGRESO A BODEGA (coordinador) ──────────────────────
+function abrirVerificacionRec(id){
+  if(!isC()){toast('Solo coordinadores pueden verificar ingresos','error');return;}
+  const r=DB.find('recolecciones',id); if(!r)return;
+  const cl=DB.find('clientes',r.clienteId)||{};
+  const exts=(r.extintores||[]).map(i=>DB.find('extintores',i)).filter(Boolean);
+  let cantidades=[];
+  try{ cantidades=JSON.parse(r.cantidades||'[]'); }catch(e){}
+
+  // Crear modal dinámico
+  let ov=ge('m-verif-rec');
+  if(!ov){ ov=document.createElement('div'); ov.id='m-verif-rec'; ov.className='ov'; document.body.appendChild(ov); }
+  ov.innerHTML=`<div class="modal lg" style="max-height:93vh;overflow-y:auto;width:640px;">
+    <div class="mh"><span class="mt">📋 Verificar ingreso a bodega</span><button class="mc btn" onclick="closeOv('m-verif-rec')">✕</button></div>
+    <div class="mb">
+
+      <!-- INFO ORDEN -->
+      <div style="background:var(--surface);border-radius:10px;padding:14px;margin-bottom:16px;display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px;">
+        <div><div style="font-size:10px;color:var(--ink3);font-weight:700;text-transform:uppercase;margin-bottom:3px;">Cliente</div><div style="font-weight:700;">${cl.empresa||'—'}</div></div>
+        <div><div style="font-size:10px;color:var(--ink3);font-weight:700;text-transform:uppercase;margin-bottom:3px;">Mensajero</div><div>${DB.find('usuarios',r.mensajeroId)?.nombre||'—'}</div></div>
+        <div><div style="font-size:10px;color:var(--ink3);font-weight:700;text-transform:uppercase;margin-bottom:3px;">Fecha recolección</div><div>${r.fechaRecoleccion?new Date(r.fechaRecoleccion).toLocaleString('es-CO'):'—'}</div></div>
+        <div><div style="font-size:10px;color:var(--ink3);font-weight:700;text-transform:uppercase;margin-bottom:3px;">Estado</div><div>${oB(r.estado)}</div></div>
+      </div>
+
+      ${r.observaciones?`<div style="background:var(--surface);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:var(--ink3);"><b>Observaciones del mensajero:</b> ${r.observaciones}</div>`:''}
+      ${r.novedad?`<div style="background:rgba(240,136,62,.1);border-left:3px solid #f0883e;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#f0883e;"><b>⚠️ Novedad registrada:</b> ${r.novedad}</div>`:''}
+
+      <!-- FOTO DEL MENSAJERO -->
+      ${r.fotoRecoleccion?`<div style="margin-bottom:16px;">
+        <div style="font-size:11px;font-weight:700;color:var(--ink3);text-transform:uppercase;margin-bottom:8px;">📷 Foto tomada por el mensajero</div>
+        <img src="${r.fotoRecoleccion}" style="width:100%;max-height:220px;object-fit:cover;border-radius:10px;border:1px solid var(--border);">
+      </div>`:''}
+
+      <!-- FIRMA DEL CLIENTE -->
+      ${r.firmaCliente?`<div style="margin-bottom:16px;">
+        <div style="font-size:11px;font-weight:700;color:var(--ink3);text-transform:uppercase;margin-bottom:8px;">✍️ Firma del cliente</div>
+        <div style="background:#fff;border-radius:10px;padding:8px;border:1px solid var(--border);">
+          <img src="${r.firmaCliente}" style="width:100%;max-height:120px;object-fit:contain;">
+        </div>
+      </div>`:''}
+
+      <!-- INVENTARIO RECOLECTADO -->
+      <div style="margin-bottom:16px;">
+        <div style="font-size:11px;font-weight:700;color:var(--ink3);text-transform:uppercase;margin-bottom:10px;">🧯 Inventario recolectado por el mensajero</div>
+        ${cantidades.length?cantidades.map((item,i)=>`
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--surface);border-radius:8px;margin-bottom:6px;border:1px solid var(--border);">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <div style="width:22px;height:22px;background:rgba(82,183,136,.15);border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#52b788;">${i+1}</div>
+            <div>
+              <div style="font-size:13px;font-weight:700;">${item.serial}</div>
+              <div style="font-size:11px;color:var(--ink3);">${item.tipo||''} ${item.capacidad||''}</div>
+            </div>
+          </div>
+          <div style="text-align:right;">
+            <div style="font-size:16px;font-weight:800;color:#52b788;">${item.cantRecogida}</div>
+            <div style="font-size:10px;color:var(--ink3);">unid. recogidas</div>
+          </div>
+        </div>`).join('')
+        : exts.map((e,i)=>`
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--surface);border-radius:8px;margin-bottom:6px;border:1px solid var(--border);">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <div style="width:22px;height:22px;background:rgba(82,183,136,.15);border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#52b788;">${i+1}</div>
+            <div><div style="font-size:13px;font-weight:700;">${e.serial}</div><div style="font-size:11px;color:var(--ink3);">${e.tipo||''} ${e.capacidad||''}</div></div>
+          </div>
+        </div>`).join('')}
+      </div>
+
+      <!-- VERIFICACIÓN QR / CÓDIGO -->
+      <div style="border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px;background:var(--surface);">
+        <div style="font-size:12px;font-weight:700;color:var(--ink2);margin-bottom:12px;">📱 Verificar dispositivo en bodega (QR o código)</div>
+        <div style="display:flex;gap:8px;margin-bottom:10px;">
+          <input class="fc" id="verif-codigo" placeholder="Escanea QR o escribe código serial..." style="flex:1;" onkeydown="if(event.key==='Enter')checkDispositivoBodega()">
+          <button class="btn btn-pr" onclick="checkDispositivoBodega()">✓ Verificar</button>
+        </div>
+        <div id="verif-resultado" style="font-size:13px;min-height:20px;"></div>
+        <div id="verif-lista" style="margin-top:10px;"></div>
+      </div>
+
+      <!-- ACCIONES FINALES -->
+      <div style="border:1px solid var(--border);border-radius:10px;padding:16px;background:var(--surface);">
+        <div style="font-size:12px;font-weight:700;color:var(--ink2);margin-bottom:12px;">⚡ Acciones</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn btn-pr" onclick="generarOrdenLab('${r.id}')">🔬 Generar orden de laboratorio</button>
+          <button class="btn btn-se" onclick="marcarEnBodega('${r.id}')">📦 Confirmar en bodega</button>
+          <button class="btn btn-se" onclick="closeOv('m-verif-rec')">Cerrar</button>
+        </div>
+      </div>
+
+    </div>
+  </div>`;
+  ov.classList.add('open');
+  // Inicializar lista verificados
+  window._verifRec={id,exts,cantidades,verificados:{}};
+}
+
+function closeOv(id){ const el=ge(id); if(el){el.classList.remove('open');} }
+
+function checkDispositivoBodega(){
+  const inp=ge('verif-codigo'); if(!inp) return;
+  const codigo=(inp.value||'').trim().replace(/\s/g,'');
+  if(!codigo){ toast('Ingresa un código o serial','error'); return; }
+
+  const res=ge('verif-resultado');
+  const lista=ge('verif-lista');
+
+  // Buscar extintor por serial exacto o parecido
+  const todos=DB.all('extintores');
+  const encontrado=todos.find(e=>
+    e.serial?.toLowerCase()===codigo.toLowerCase() ||
+    e.serial?.replace(/\s/g,'').toLowerCase()===codigo.toLowerCase()
+  );
+
+  if(!encontrado){
+    res.innerHTML=`<div style="color:var(--red);background:rgba(230,57,70,.1);border-radius:8px;padding:10px 14px;border-left:3px solid var(--red);">❌ Código <b>${codigo}</b> no encontrado en la base de datos</div>`;
+    inp.value='';
+    return;
+  }
+
+  const cl=DB.find('clientes',encontrado.clienteId)||{};
+  const yaVerif=window._verifRec?.verificados?.[encontrado.id];
+
+  // Marcar como verificado
+  if(window._verifRec) window._verifRec.verificados[encontrado.id]=true;
+
+  res.innerHTML=`<div style="color:#52b788;background:rgba(82,183,136,.1);border-radius:8px;padding:10px 14px;border-left:3px solid #52b788;">
+    ✅ Dispositivo encontrado: <b>${encontrado.serial}</b> — ${encontrado.tipo||''} ${encontrado.capacidad||''}<br>
+    <span style="font-size:12px;color:var(--ink3);">Cliente: ${cl.empresa||'—'} · Estado: ${encontrado.estado||'activo'}</span>
+    ${yaVerif?'<br><span style="font-size:11px;color:#f0883e;">⚠️ Ya verificado anteriormente en esta sesión</span>':''}
+  </div>`;
+
+  // Actualizar estado del extintor a 'en_bodega'
+  DB.save('extintores',{...encontrado, estado:'en_bodega'});
+
+  // Agregar a lista verificados
+  if(!lista.innerHTML.includes(encontrado.serial)){
+    const item=document.createElement('div');
+    item.style.cssText='display:flex;align-items:center;gap:8px;padding:6px 10px;background:rgba(82,183,136,.08);border-radius:6px;margin-bottom:4px;font-size:12px;';
+    item.innerHTML=`<span style="color:#52b788;font-weight:700;">✓</span> <b>${encontrado.serial}</b> — ${encontrado.tipo||''} ${encontrado.capacidad||''} <span style="color:var(--ink3);margin-left:auto;">📦 En bodega</span>`;
+    lista.appendChild(item);
+  }
+  inp.value='';
+  inp.focus();
+}
+
+function generarOrdenLab(recId){
+  if(!isC()){toast('Solo coordinadores','error');return;}
+  const r=DB.find('recolecciones',recId); if(!r)return;
+  const exts=(r.extintores||[]).map(i=>DB.find('extintores',i)).filter(Boolean);
+  if(!exts.length){toast('No hay extintores en esta recolección','error');return;}
+
+  const tecnicos=DB.all('usuarios').filter(u=>u.rol==='laboratorio'||u.rol==='coordinador');
+  const ov=document.createElement('div'); ov.className='ov open'; ov.style.zIndex='9999';
+  ov.innerHTML=`<div class="modal" style="width:480px;">
+    <div class="mh"><span class="mt">🔬 Nueva orden de laboratorio</span><button class="mc btn" onclick="this.closest('.ov').remove()">✕</button></div>
+    <div class="mb">
+      <div style="font-size:13px;color:var(--ink3);margin-bottom:14px;">Se creará una orden para <b>${exts.length}</b> extintor(es) de la recolección</div>
+      <div class="fg"><label>Técnico asignado</label>
+        <select class="fc" id="lab-tec-rec">
+          ${tecnicos.map(u=>`<option value="${u.id}">${u.nombre} (${rL(u.rol)})</option>`).join('')}
+        </select>
+      </div>
+      <div class="fg"><label>Prioridad</label>
+        <select class="fc" id="lab-pri-rec">
+          <option value="alta">🔴 Alta</option>
+          <option value="media" selected>🟡 Media</option>
+          <option value="baja">🟢 Baja</option>
+        </select>
+      </div>
+      <div style="background:var(--surface);border-radius:8px;padding:10px;margin-top:10px;">
+        <div style="font-size:11px;font-weight:700;color:var(--ink3);text-transform:uppercase;margin-bottom:8px;">Extintores incluidos</div>
+        ${exts.map(e=>`<div style="font-size:12px;padding:3px 0;border-bottom:1px solid var(--border);">🧯 <b>${e.serial}</b> — ${e.tipo||''} ${e.capacidad||''}</div>`).join('')}
+      </div>
+    </div>
+    <div class="mf">
+      <button class="btn btn-se" onclick="this.closest('.ov').remove()">Cancelar</button>
+      <button class="btn btn-pr" onclick="confirmarOrdenLab('${recId}',this)">🔬 Crear orden</button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+}
+
+function confirmarOrdenLab(recId, btn){
+  const r=DB.find('recolecciones',recId); if(!r)return;
+  const exts=(r.extintores||[]).map(i=>DB.find('extintores',i)).filter(Boolean);
+  const tecnicoId=ge('lab-tec-rec')?.value||'';
+  const prioridad=ge('lab-pri-rec')?.value||'media';
+
+  // Crear una orden de laboratorio por cada extintor
+  exts.forEach(e=>{
+    DB.save('laboratorio',{
+      extintor: e.id,
+      clienteId: e.clienteId||r.clienteId,
+      tecnicoId,
+      prioridad,
+      estado: 'diagnostico',
+      diagnostico: '',
+      materialesRequeridos: [],
+      aprobadoCliente: false,
+      origenRecoleccion: recId
+    });
+    // Actualizar estado del extintor
+    DB.save('extintores',{...e, estado:'en_laboratorio'});
+  });
+
+  // Cerrar recolección como completada
+  DB.save('recolecciones',{...r, estado:'completada', fechaCierre:new Date().toISOString()});
+
+  btn.closest('.ov').remove();
+  closeOv('m-verif-rec');
+  toast(`✅ ${exts.length} orden(es) de laboratorio creadas`,'success');
+  goTo('recolecciones');
+}
+
+function marcarEnBodega(recId){
+  if(!isC()){toast('Solo coordinadores','error');return;}
+  const r=DB.find('recolecciones',recId); if(!r)return;
+  DB.save('recolecciones',{...r, estado:'completada', fechaCierre:new Date().toISOString(), enBodega:true});
+  // Marcar extintores en bodega
+  (r.extintores||[]).forEach(eid=>{
+    const e=DB.find('extintores',eid);
+    if(e) DB.save('extintores',{...e,estado:'en_bodega'});
+  });
+  closeOv('m-verif-rec');
+  toast('📦 Recolección cerrada — extintores en bodega','success');
+  goTo('recolecciones');
+}
+
 function autorizarNovedad(recId){
   if(!isC()){toast('Solo coordinadores','error');return;}
   const r=DB.find('recolecciones',recId);if(!r)return;
