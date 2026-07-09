@@ -17,6 +17,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:#f0f2f5;color:#1a1a2e;-
   --border:#e8eaf0;--surface:#f8f9fc;
   --white:#ffffff;--ink:#1a1a2e;--ink2:#4a4a6a;--ink3:#9090a0;
 }
+@keyframes gpsPulse{0%{box-shadow:0 0 0 0 rgba(0,208,132,.5);}70%{box-shadow:0 0 0 14px rgba(0,208,132,0);}100%{box-shadow:0 0 0 0 rgba(0,208,132,0);}}
 ::-webkit-scrollbar{width:4px;height:4px}
 ::-webkit-scrollbar-thumb{background:#d0d0e0;border-radius:99px}
 button{font-family:inherit;cursor:pointer;border:none;background:none}
@@ -200,7 +201,7 @@ tbody tr:hover td{background:#fafbff}
 <div id="app"></div>
 <script>
 const SBURL = 'https://ilivtsacimtffnaxgtwx.supabase.co';
-const SBKEY = 'sb_publishable_RBFJ8i1X9wO2F402TSUFiw_bUH8Ui0T';
+const SBKEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlsaXZ0c2FjaW10ZmZuYXhndHd4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNDI3NzgsImV4cCI6MjA5NDcxODc3OH0.jxY-K5E6mpCN2Ny2lPD46kfuvKXdI_L5OTqll0lLhZk';
 const SBH = {'apikey':SBKEY,'Authorization':'Bearer '+SBKEY,'Content-Type':'application/json','Prefer':'return=representation'};
 let APP = {user:null,page:'dashboard',timer:null,gps:null};
 
@@ -385,6 +386,12 @@ function showLogin(){
 // ── SHELL ──────────────────────────────────────────────────────────────
 function showApp(){
   const u=APP.user;
+  // ── MENSAJERO: pantalla GPS directa ──────────────────────
+  if(u.rol==='mensajero'){
+    showAppMensajero(u);
+    return;
+  }
+  // ── OTROS ROLES: CRM normal ───────────────────────────────
   const an=DB.all('alertas').filter(a=>!a.leida).length;
   const pn=Q.get().length;
   ge('app').innerHTML=`<div class="shell"><aside id="sb">${buildSB(u,pn)}</aside><main id="main"><div id="tb"><button onclick="toggleSB()" class="btn btn-gh btn-sm">☰</button><span id="tb-t" class="tb-title">Dashboard</span><div class="tb-right"><div class="odot" id="odot"></div><span id="otxt" style="font-size:12px;color:var(--ink3);">En línea</span><button class="btn btn-se btn-sm" onclick="goTo('alertas')">🔔 <span class="ni-badge" style="position:static;">${an}</span></button></div></div><div id="pg"></div></main></div>`;
@@ -393,7 +400,191 @@ function showApp(){
   window.addEventListener('offline',onlineCheck);
   onlineCheck(); syncSt();
   APP.timer=setInterval(()=>{ if(navigator.onLine) syncNow() },30000);
-  if(u.rol==='mensajero') setTimeout(startGPS,1000);
+  goTo('dashboard');
+}
+
+function showAppMensajero(u){
+  // Pantalla completa GPS para el mensajero
+  ge('app').innerHTML=`
+  <div style="min-height:100vh;background:#0d1117;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;font-family:inherit;">
+
+    <!-- HEADER -->
+    <div style="text-align:center;margin-bottom:28px;">
+      <div style="width:56px;height:56px;background:#C8281E;border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:26px;margin:0 auto 12px;box-shadow:0 0 30px rgba(200,40,30,.4);">🧯</div>
+      <div style="font-size:20px;font-weight:700;color:#e6edf3;">Safety CRM</div>
+      <div style="font-size:12px;color:#484f58;margin-top:3px;">Módulo mensajero · GPS en vivo</div>
+    </div>
+
+    <!-- CARD ESTADO -->
+    <div style="width:100%;max-width:380px;background:#161b22;border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:26px;margin-bottom:14px;">
+      <div style="text-align:center;margin-bottom:20px;">
+        <div id="gps-pulse" style="width:18px;height:18px;border-radius:50%;background:#484f58;margin:0 auto 12px;transition:background .3s;"></div>
+        <div style="font-size:18px;font-weight:700;color:#e6edf3;">${u.nombre}</div>
+        <div style="font-size:12px;color:#484f58;margin-top:3px;">Mensajero · ${u.email}</div>
+      </div>
+
+      <div id="gps-alerta" style="display:none;padding:10px 14px;border-radius:8px;font-size:12px;border-left:3px solid #f85149;background:rgba(248,81,73,.1);color:#ff8080;margin-bottom:14px;"></div>
+
+      <div style="background:#1c2330;border-radius:10px;overflow:hidden;margin-bottom:16px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:11px 14px;border-bottom:1px solid rgba(255,255,255,.06);">
+          <span style="font-size:12px;color:#8b949e;">Estado GPS</span>
+          <span id="inf-estado" style="font-size:12px;font-weight:600;color:#484f58;">Inactivo</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:11px 14px;border-bottom:1px solid rgba(255,255,255,.06);">
+          <span style="font-size:12px;color:#8b949e;">Última señal</span>
+          <span id="inf-hora" style="font-size:12px;font-weight:600;color:#e6edf3;">—</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:11px 14px;border-bottom:1px solid rgba(255,255,255,.06);">
+          <span style="font-size:12px;color:#8b949e;">Precisión</span>
+          <span id="inf-precision" style="font-size:12px;font-weight:600;color:#e6edf3;">—</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:11px 14px;">
+          <span style="font-size:12px;color:#8b949e;">Señales enviadas</span>
+          <span id="inf-envios" style="font-size:12px;font-weight:600;color:#00d084;">0</span>
+        </div>
+      </div>
+
+      <div id="gps-coords" style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#484f58;text-align:center;min-height:16px;margin-bottom:16px;"></div>
+
+      <button id="btn-gps" onclick="mensajeroActivarGPS()" style="width:100%;padding:13px;background:#C8281E;color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;transition:all .15s;letter-spacing:.02em;">
+        📍 Activar GPS y transmitir
+      </button>
+    </div>
+
+    <!-- PIE -->
+    <div style="display:flex;gap:10px;width:100%;max-width:380px;">
+      <button onclick="logout()" style="padding:11px 14px;background:#1c2330;color:#8b949e;border:1px solid rgba(255,255,255,.1);border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">
+        🚪 Salir
+      </button>
+      <button onclick="showCRMCompleto()" style="flex:1;padding:11px;background:#1c2330;color:#e6edf3;border:1px solid rgba(255,255,255,.15);border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">
+        📋 Ir al CRM completo
+      </button>
+    </div>
+
+  </div>`;
+
+  // Iniciar GPS automáticamente
+  setTimeout(mensajeroActivarGPS, 800);
+}
+
+let _gpsEnvios = 0;
+let _gpsWatch  = null;
+let _gpsTimer  = null;
+
+function mensajeroActivarGPS(){
+  if(!navigator.geolocation){
+    _gpsAlerta('Tu dispositivo no soporta GPS.');
+    return;
+  }
+  const btn = ge('btn-gps');
+  if(btn){ btn.textContent='⏳ Obteniendo señal GPS...'; btn.disabled=true; }
+
+  navigator.geolocation.getCurrentPosition(
+    (pos)=>{
+      _gpsSendPos(pos);
+      _gpsSetActivo();
+      // Watch continuo
+      if(_gpsWatch) navigator.geolocation.clearWatch(_gpsWatch);
+      _gpsWatch = navigator.geolocation.watchPosition(
+        (p)=>_gpsSendPos(p),
+        (e)=>_gpsOnError(e),
+        {enableHighAccuracy:true, timeout:15000, maximumAge:5000}
+      );
+      // Heartbeat cada 10s por si watchPosition se detiene
+      if(_gpsTimer) clearInterval(_gpsTimer);
+      _gpsTimer = setInterval(()=>{
+        navigator.geolocation.getCurrentPosition(
+          (p)=>_gpsSendPos(p),
+          ()=>{},
+          {enableHighAccuracy:true, timeout:10000, maximumAge:8000}
+        );
+      }, 10000);
+    },
+    (err)=>{
+      if(btn){ btn.textContent='📍 Activar GPS y transmitir'; btn.disabled=false; }
+      _gpsOnError(err);
+    },
+    {enableHighAccuracy:true, timeout:20000, maximumAge:0}
+  );
+}
+
+function _gpsSetActivo(){
+  const pulse = ge('gps-pulse');
+  if(pulse){
+    pulse.style.background='#00d084';
+    pulse.style.boxShadow='0 0 0 0 rgba(0,208,132,.4)';
+    pulse.style.animation='gpsPulse 2s infinite';
+  }
+  const btn=ge('btn-gps');
+  if(btn){
+    btn.textContent='🟢 Transmitiendo en vivo';
+    btn.disabled=true;
+    btn.style.background='rgba(0,208,132,.15)';
+    btn.style.color='#00d084';
+    btn.style.border='1px solid rgba(0,208,132,.3)';
+  }
+  const est=ge('inf-estado');
+  if(est){ est.textContent='Transmitiendo'; est.style.color='#00d084'; }
+}
+
+async function _gpsSendPos(pos){
+  const lat = pos.coords.latitude;
+  const lng = pos.coords.longitude;
+  const acc = Math.round(pos.coords.accuracy);
+  const u   = APP.user;
+  try{
+    await fetch('https://ilivtsacimtffnaxgtwx.supabase.co/rest/v1/ubicaciones',{
+      method:'POST',
+      headers:{
+        'apikey':'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlsaXZ0c2FjaW10ZmZuYXhndHd4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNDI3NzgsImV4cCI6MjA5NDcxODc3OH0.jxY-K5E6mpCN2Ny2lPD46kfuvKXdI_L5OTqll0lLhZk',
+        'Authorization':'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlsaXZ0c2FjaW10ZmZuYXhndHd4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNDI3NzgsImV4cCI6MjA5NDcxODc3OH0.jxY-K5E6mpCN2Ny2lPD46kfuvKXdI_L5OTqll0lLhZk',
+        'Content-Type':'application/json',
+        'Prefer':'resolution=merge-duplicates'
+      },
+      body:JSON.stringify({
+        id: u.id,
+        usuarioId: u.id,
+        nombre: u.nombre,
+        lat: lat,
+        lng: lng,
+        ts: new Date().toISOString()
+      })
+    });
+    _gpsEnvios++;
+    const hora = new Date().toLocaleTimeString('es-CO');
+    const eh=ge('inf-envios'); if(eh) eh.textContent=_gpsEnvios;
+    const hh=ge('inf-hora');   if(hh) hh.textContent=hora;
+    const ph=ge('inf-precision'); if(ph) ph.textContent=acc+' m';
+    const ch=ge('gps-coords'); if(ch) ch.textContent=lat.toFixed(6)+', '+lng.toFixed(6);
+    const ah=ge('gps-alerta'); if(ah) ah.style.display='none';
+  }catch(e){
+    _gpsAlerta('Sin conexión — reintentando...');
+  }
+}
+
+function _gpsOnError(err){
+  const msgs={1:'Permiso de GPS denegado. Ve a Configuración → Permisos → Ubicación y actívalo.',2:'No se pudo obtener señal GPS. Sal al exterior e intenta de nuevo.',3:'Tiempo agotado obteniendo GPS. Intenta de nuevo.'};
+  _gpsAlerta(msgs[err.code]||'Error GPS: '+err.message);
+  const pulse=ge('gps-pulse'); if(pulse){pulse.style.background='#f85149';pulse.style.animation='none';}
+  const est=ge('inf-estado'); if(est){est.textContent='Error GPS';est.style.color='#f85149';}
+  const btn=ge('btn-gps'); if(btn){btn.textContent='📍 Reintentar GPS';btn.disabled=false;btn.style.background='#C8281E';btn.style.color='#fff';btn.style.border='none';}
+}
+
+function _gpsAlerta(msg){
+  const el=ge('gps-alerta');
+  if(el){el.style.display='block';el.textContent=msg;}
+}
+
+function showCRMCompleto(){
+  const u=APP.user;
+  const an=DB.all('alertas').filter(a=>!a.leida).length;
+  const pn=Q.get().length;
+  ge('app').innerHTML=`<div class="shell"><aside id="sb">${buildSB(u,pn)}</aside><main id="main"><div id="tb"><button onclick="toggleSB()" class="btn btn-gh btn-sm">☰</button><span id="tb-t" class="tb-title">Dashboard</span><div class="tb-right"><div class="odot" id="odot"></div><span id="otxt" style="font-size:12px;color:var(--ink3);">En línea</span><button class="btn btn-se btn-sm" onclick="goTo('alertas')">🔔 <span class="ni-badge" style="position:static;">${an}</span></button><button onclick="showAppMensajero(APP.user)" style="background:#C8281E;color:#fff;border:none;border-radius:7px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;margin-left:6px;">📍 GPS</button></div></div><div id="pg"></div></main></div>`;
+  qsa('.ni[data-pg]').forEach(n=>n.addEventListener('click',()=>goTo(n.dataset.pg)));
+  window.addEventListener('online',onlineCheck);
+  window.addEventListener('offline',onlineCheck);
+  onlineCheck(); syncSt();
+  APP.timer=setInterval(()=>{ if(navigator.onLine) syncNow() },30000);
   goTo('dashboard');
 }
 
@@ -763,7 +954,7 @@ function pgRec(c){
   c.innerHTML=`<div style="padding:28px">
   <div class="ph"><div><div class="ph-t">📦 Recolecciones</div><div class="ph-s">${rc.filter(r=>r.estado==='pendiente').length} pendientes de ${rc.length}</div></div><div class="ph-a"><select class="fc" style="width:auto" onchange="fAttr('t-rc','data-est',this.value)"><option value="">Todos</option><option value="pendiente">Pendiente</option><option value="en_ruta">En ruta</option><option value="completada">Completada</option></select>${isC()?`<button class="btn btn-pr" onclick="mRec()">+ Nueva orden</button>`:''}</div></div>
   <div class="card"><div class="tw"><table id="t-rc"><thead><tr><th>Cliente</th><th>Mensajero</th><th>Estado</th><th>Prioridad</th><th>Fecha</th><th>Acciones</th></tr></thead><tbody>
-  ${rc.map(r=>{const m=DB.find('usuarios',r.mensajeroId);return`<tr data-est="${r.estado}"><td><b>${cN(r.clienteId)}</b></td><td>${m?m.nombre:'<span style="color:var(--red);font-size:12px;font-weight:600">Sin asignar</span>'}</td><td>${oB(r.estado)}</td><td>${pB(r.prioridad)}</td><td>${fD(r.fechaProgramada)}</td><td><div style="display:flex;gap:4px">${isC()?`<button class="btn btn-se btn-sm" onclick="asignarMens('${r.id}','rec')">👤 Asignar</button><button class="btn btn-ou btn-sm" onclick="chgRec('${r.id}')">🔄</button><button class="btn btn-da btn-sm" onclick="delRec('${r.id}')">🗑️</button>`:''}</div></td></tr>`}).join('')||'<tr><td colspan="6"><div class="empty"><div class="empty-ic">📦</div><div class="empty-t">Sin recolecciones</div></div></td></tr>'}
+  ${rc.map(r=>{const m=DB.find('usuarios',r.mensajeroId);return`<tr data-est="${r.estado}"><td><b>${cN(r.clienteId)}</b></td><td>${m?m.nombre:'<span style="color:var(--red);font-size:12px;font-weight:600">Sin asignar</span>'}</td><td>${oB(r.estado)}</td><td>${pB(r.prioridad)}</td><td>${fD(r.fechaProgramada)}</td><td><div style="display:flex;gap:4px">${isC()?`<button class="btn btn-se btn-sm" onclick="asignarMens('${r.id}','rec')">👤 Asignar</button><button class="btn btn-ou btn-sm" onclick="chgRec('${r.id}')">🔄</button>${r.novedad&&!r.novedadAutorizada?`<button class="btn btn-pr btn-sm" style="background:#f0883e;border-color:#f0883e;" onclick="autorizarNovedad('${r.id}')">⚠️ Autorizar novedad</button>`:''}<button class="btn btn-da btn-sm" onclick="delRec('${r.id}')">🗑️</button>`:''}</div></td></tr>`}).join('')||'<tr><td colspan="6"><div class="empty"><div class="empty-ic">📦</div><div class="empty-t">Sin recolecciones</div></div></td></tr>'}
   </tbody></table></div></div>
   <div class="ov" id="m-rec"><div class="modal"><div class="mh"><span class="mt">Nueva Recolección</span><button class="mc btn" onclick="closeM('m-rec')">✕</button></div><div class="mb"><div class="fg"><label>Cliente <span class="req">*</span></label><select class="fc" id="rec-cl" onchange="ldExtR(this.value)"><option value="">Seleccionar...</option>${cl.map(c2=>`<option value="${c2.id}">${c2.empresa}</option>`).join('')}</select></div><div class="fg"><label>Extintores</label><div id="rec-exts" style="border:1.5px solid var(--border);border-radius:10px;padding:10px;max-height:130px;overflow-y:auto;font-size:13px;color:var(--ink3)">Selecciona un cliente</div></div><div class="fg2"><div class="fg"><label>Mensajero</label><select class="fc" id="rec-men">${mens.map(u=>`<option value="${u.id}">${u.nombre}</option>`).join('')}</select></div><div class="fg"><label>Prioridad</label><select class="fc" id="rec-pri"><option value="alta">🔴 Alta</option><option value="media" selected>🟡 Media</option><option value="baja">🟢 Baja</option></select></div><div class="fg"><label>Fecha</label><input class="fc" id="rec-fe" type="date"></div></div><div class="fg"><label>Observaciones</label><textarea class="fc" id="rec-obs" rows="2"></textarea></div></div><div class="mf"><button class="btn btn-se" onclick="closeM('m-rec')">Cancelar</button><button class="btn btn-pr" onclick="saveRec()">Crear orden</button></div></div></div>
   </div>`;
@@ -953,33 +1144,176 @@ function delMat(id){ confirmSA('Eliminar material',()=>{DB.del('materiales',id);
 // ── MENSAJERO ──────────────────────────────────────────────────────────────
 function pgMens(c){
   const u=APP.user;
-  const rc=DB.all('recolecciones').filter(r=>r.mensajeroId===u.id&&r.estado!=='completada');
-  const en=DB.all('entregas').filter(e=>e.estado==='pendiente');
-  c.innerHTML=`<div style="padding:28px;max-width:500px;margin:0 auto">
-  <div style="background:linear-gradient(135deg,#1a1a2e,#e63946);color:#fff;border-radius:18px;padding:24px;margin-bottom:16px;box-shadow:0 8px 24px rgba(230,57,70,.3)">
-    <div style="font-weight:800;font-size:22px;margin-bottom:4px">¡Hola, ${u.nombre.split(' ')[0]}! 👋</div>
-    <div style="opacity:.7;font-size:13px">${fD(ts())}</div>
-    <div style="display:flex;gap:10px;margin-top:16px">
-      <div style="background:rgba(255,255,255,.15);border-radius:12px;padding:12px 18px;text-align:center;flex:1"><div style="font-size:28px;font-weight:800">${rc.length}</div><div style="font-size:11px;opacity:.8">Recolecciones</div></div>
-      <div style="background:rgba(255,255,255,.15);border-radius:12px;padding:12px 18px;text-align:center;flex:1"><div style="font-size:28px;font-weight:800">${en.length}</div><div style="font-size:11px;opacity:.8">Entregas</div></div>
+  const rc=DB.all('recolecciones').filter(r=>r.mensajeroId===u.id&&r.estado!=='completada'&&r.estado!=='cancelada');
+  const en=DB.all('entregas').filter(e=>e.mensajeroId===u.id&&e.estado!=='completada'&&e.estado!=='cancelada');
+  const gpsOk=!!_gpsWatch;
+  c.innerHTML=`<div style="padding:16px;max-width:520px;margin:0 auto">
+  <div style="background:linear-gradient(135deg,#1a1a2e,#C8281E);color:#fff;border-radius:18px;padding:20px;margin-bottom:14px;box-shadow:0 8px 24px rgba(200,40,30,.3)">
+    <div style="font-weight:800;font-size:20px;margin-bottom:2px">¡Hola, ${u.nombre.split(' ')[0]}! 👋</div>
+    <div style="opacity:.7;font-size:12px">${fD(ts())}</div>
+    <div style="display:flex;gap:10px;margin-top:14px">
+      <div style="background:rgba(255,255,255,.15);border-radius:12px;padding:10px;text-align:center;flex:1"><div style="font-size:26px;font-weight:800">${rc.length}</div><div style="font-size:11px;opacity:.8">Recolecciones</div></div>
+      <div style="background:rgba(255,255,255,.15);border-radius:12px;padding:10px;text-align:center;flex:1"><div style="font-size:26px;font-weight:800">${en.length}</div><div style="font-size:11px;opacity:.8">Entregas</div></div>
     </div>
-    <div style="margin-top:14px;background:rgba(255,255,255,.1);border-radius:10px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between">
-      <div id="gps-indicador" style="font-size:11px;opacity:.8">${APP.gps?'📍 GPS activo':'⚠️ GPS inactivo'}</div>
-      ${!APP.gps?`<button onclick="activarGPSManual()" style="background:rgba(255,255,255,.2);color:#fff;border:none;border-radius:7px;padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer">Activar GPS</button>`:'<span style="font-size:11px;background:rgba(45,106,79,.4);padding:3px 10px;border-radius:99px">🟢 Transmitiendo</span>'}
+    <div style="margin-top:12px;background:rgba(255,255,255,.1);border-radius:10px;padding:8px 14px;display:flex;align-items:center;justify-content:space-between">
+      <span style="font-size:11px;">${gpsOk?'🟢 GPS transmitiendo':'⚠️ GPS inactivo'}</span>
+      ${!gpsOk?`<button onclick="mensajeroActivarGPS()" style="background:rgba(255,255,255,.2);color:#fff;border:none;border-radius:7px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer">Activar GPS</button>`:''}
     </div>
   </div>
-  ${rc.length?rc.map(r=>{const cl=DB.find('clientes',r.clienteId)||{};return`<div style="background:#fff;border-radius:16px;border:1.5px solid var(--border);padding:18px;margin-bottom:12px;box-shadow:0 2px 8px rgba(0,0,0,.06)"><div style="display:flex;justify-content:space-between;margin-bottom:10px">${pB(r.prioridad)}${oB(r.estado)}</div><div style="font-weight:700;font-size:17px;margin-bottom:4px">📦 ${cl.empresa||'Cliente'}</div><div style="font-size:12px;color:var(--ink3);margin-bottom:3px">📍 ${cl.direccion||''}</div><div style="font-size:12px;color:var(--ink3);margin-bottom:13px">👤 ${cl.contacto||'—'} · 📞 ${cl.telefono||'—'}</div><div style="display:flex;gap:8px;flex-wrap:wrap">${cl.telefono?`<a href="tel:${cl.telefono}" class="btn btn-se btn-sm">📞 Llamar</a>`:''}${cl.lat&&cl.lng?`<button class="btn btn-pr btn-sm" onclick="window.open('https://waze.com/ul?ll=${cl.lat},${cl.lng}&navigate=yes','_blank')">🗺️ Waze</button>`:''}<button class="btn btn-gr btn-sm" onclick="confRec('${r.id}')">✅ Confirmar</button></div></div>`}).join(''):'<div class="empty"><div class="empty-ic">📦</div><div class="empty-t">¡Todo al día!</div><div style="color:var(--ink3);font-size:13px">Sin órdenes pendientes</div></div>'}
+  <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#8b949e;margin-bottom:8px;">📦 Mis Recolecciones</div>
+  ${rc.length?rc.map(r=>_cardRec(r)).join(''):`<div style="background:#161b22;border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:30px;text-align:center;margin-bottom:14px;color:#484f58"><div style="font-size:32px;margin-bottom:8px">📦</div><div style="font-size:13px;">Sin recolecciones asignadas</div></div>`}
+  <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#8b949e;margin-bottom:8px;margin-top:4px;">🚚 Mis Entregas</div>
+  ${en.length?en.map(e=>_cardEnt(e)).join(''):`<div style="background:#161b22;border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:30px;text-align:center;margin-bottom:14px;color:#484f58"><div style="font-size:32px;margin-bottom:8px">🚚</div><div style="font-size:13px;">Sin entregas asignadas</div></div>`}
+  </div>
+  <div class="ov" id="m-mens-rec"><div class="modal lg" style="max-height:90vh;overflow-y:auto;"><div class="mh"><span class="mt" id="m-mens-rec-t">Recolección</span><button class="mc btn" onclick="closeM('m-mens-rec')">✕</button></div><div class="mb" id="m-mens-rec-b"></div></div></div>
+  <div class="ov" id="m-mens-ent"><div class="modal lg" style="max-height:90vh;overflow-y:auto;"><div class="mh"><span class="mt" id="m-mens-ent-t">Entrega</span><button class="mc btn" onclick="closeM('m-mens-ent')">✕</button></div><div class="mb" id="m-mens-ent-b"></div></div></div>`;
+}
+
+function _cardRec(r){
+  const cl=DB.find('clientes',r.clienteId)||{};
+  const exts=(r.extintores||[]).map(id=>DB.find('extintores',id)).filter(Boolean);
+  const novBadge=r.novedad?`<div style="background:rgba(248,81,73,.1);border:1px solid rgba(248,81,73,.3);border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px;color:#f85149;">⚠️ <b>Novedad:</b> ${r.novedad} ${r.novedadAutorizada?'<span style="color:#00d084">✓ Autorizada</span>':'<span style="color:#f0883e">⏳ Pendiente autorización</span>'}</div>`:'';
+  return `<div style="background:#161b22;border:1px solid ${r.novedad&&!r.novedadAutorizada?'rgba(248,81,73,.4)':'rgba(255,255,255,.08)'};border-radius:14px;padding:16px;margin-bottom:12px;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;"><div><div style="font-weight:700;font-size:15px;color:#e6edf3;">📦 ${cl.empresa||'Cliente'}</div><div style="font-size:11px;color:#8b949e;margin-top:2px;">📍 ${cl.direccion||'Sin dirección'}</div><div style="font-size:11px;color:#8b949e;">📞 ${cl.telefono||'—'} · 👤 ${cl.contacto||'—'}</div></div><div style="text-align:right;">${pB(r.prioridad)}<br><span style="font-size:10px;color:#484f58;">${fD(r.fechaProgramada)}</span></div></div>
+    ${novBadge}
+    <div style="background:#1c2330;border-radius:8px;padding:10px;margin-bottom:10px;font-size:12px;color:#8b949e;"><div style="font-weight:600;color:#e6edf3;margin-bottom:6px;">Extintores a recoger (${exts.length})</div>${exts.map(e=>`<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.05);"><span><b>${e.serial}</b> — ${e.tipo} ${e.capacidad||''}</span></div>`).join('')||'<span style="color:#484f58;">Sin extintores</span>'}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">${cl.telefono?`<a href="tel:${cl.telefono}" class="btn btn-se btn-sm">📞 Llamar</a>`:''}${cl.lat&&cl.lng?`<button class="btn btn-se btn-sm" onclick="window.open('https://waze.com/ul?ll=${cl.lat},${cl.lng}&navigate=yes','_blank')">🗺️ Waze</button>`:''}${r.novedad&&!r.novedadAutorizada?'<span style="font-size:12px;color:#f0883e;padding:5px;margin-left:auto;">⏳ Esperando autorización...</span>':`<button class="btn btn-pr btn-sm" onclick="abrirFlujRec('${r.id}')" style="margin-left:auto;">📷 Registrar recolección →</button>`}</div>
   </div>`;
 }
-function confRec(id){ DB.save('recolecciones',{...DB.find('recolecciones',id),estado:'completada'}); toast('Confirmado ✓','success'); goTo('mensajero'); }
+
+function _cardEnt(e){
+  const cl=DB.find('clientes',e.clienteId)||{};
+  const exts=(e.extintores||[]).map(id=>DB.find('extintores',id)).filter(Boolean);
+  return `<div style="background:#161b22;border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:16px;margin-bottom:12px;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;"><div><div style="font-weight:700;font-size:15px;color:#e6edf3;">🚚 ${cl.empresa||'Cliente'}</div><div style="font-size:11px;color:#8b949e;margin-top:2px;">📍 ${cl.direccion||'Sin dirección'}</div><div style="font-size:11px;color:#8b949e;">📞 ${cl.telefono||'—'} · 👤 ${cl.contacto||'—'}</div></div><span style="font-size:10px;color:#484f58;">${fD(e.fechaProgramada)}</span></div>
+    <div style="background:#1c2330;border-radius:8px;padding:10px;margin-bottom:10px;font-size:12px;color:#8b949e;"><div style="font-weight:600;color:#e6edf3;margin-bottom:6px;">Extintores a entregar (${exts.length})</div>${exts.map(ex=>`<div style="padding:3px 0;border-bottom:1px solid rgba(255,255,255,.05);"><b>${ex.serial}</b> <span style="color:#8b949e;font-size:12px;">— ${ex.tipo} ${ex.capacidad||''}</span></div>`).join('')||'<span style="color:#484f58;">Sin extintores</span>'}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">${cl.telefono?`<a href="tel:${cl.telefono}" class="btn btn-se btn-sm">📞 Llamar</a>`:''}${cl.lat&&cl.lng?`<button class="btn btn-se btn-sm" onclick="window.open('https://waze.com/ul?ll=${cl.lat},${cl.lng}&navigate=yes','_blank')">🗺️ Waze</button>`:''}<button class="btn btn-pr btn-sm" onclick="abrirFlujEnt('${e.id}')" style="margin-left:auto;">✅ Realizar entrega →</button></div>
+  </div>`;
+}
+
+let _recFoto=null;
+function abrirFlujRec(id){
+  const r=DB.find('recolecciones',id);if(!r)return;
+  const cl=DB.find('clientes',r.clienteId)||{};
+  const exts=(r.extintores||[]).map(i=>DB.find('extintores',i)).filter(Boolean);
+  _recFoto=null;
+  ge('m-mens-rec-t').textContent=`📦 Recolección — ${cl.empresa||''}`;
+  ge('m-mens-rec-b').innerHTML=`
+    <div style="margin-bottom:14px;background:#1c2330;border-radius:10px;padding:12px 16px;">
+      <div style="font-size:11px;color:#484f58;font-weight:700;text-transform:uppercase;margin-bottom:6px;">Extintores esperados (${exts.length}) — Ingresa cantidad recogida</div>
+      ${exts.map((e,i)=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.05);"><div><b style="color:#e6edf3;">${e.serial}</b> <span style="color:#8b949e;font-size:12px;">— ${e.tipo} ${e.capacidad||''}</span></div><div style="display:flex;align-items:center;gap:8px;"><span style="font-size:11px;color:#484f58;">Cant:</span><input type="number" min="0" max="99" value="1" id="cant-rec-${i}" style="width:58px;padding:5px 8px;border:1px solid rgba(255,255,255,.15);border-radius:6px;background:#0d1117;color:#e6edf3;font-size:13px;text-align:center;"></div></div>`).join('')||'<span style="color:#484f58;font-size:12px;">Sin extintores asignados</span>'}
+    </div>
+    <div style="margin-bottom:14px;">
+      <div style="font-size:11px;color:#484f58;font-weight:700;text-transform:uppercase;margin-bottom:8px;">📷 Foto de lo que recoges <span style="color:#C8281E">*</span></div>
+      <div id="rec-foto-prev" style="margin-bottom:8px;"></div>
+      <label style="display:flex;align-items:center;gap:10px;background:#1c2330;border:1px dashed rgba(255,255,255,.2);border-radius:10px;padding:14px;cursor:pointer;"><span style="font-size:24px;">📷</span><span style="font-size:13px;color:#8b949e;">Toca para tomar foto o seleccionar</span><input type="file" accept="image/*" capture="environment" style="display:none" onchange="prevRecFoto(this)"></label>
+    </div>
+    <div style="margin-bottom:14px;"><div style="font-size:11px;color:#484f58;font-weight:700;text-transform:uppercase;margin-bottom:6px;">Observaciones</div><textarea id="rec-obs-mens" class="fc" rows="2" placeholder="Comentarios sobre la recolección..."></textarea></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;"><button class="btn btn-se" onclick="closeM('m-mens-rec')">Cancelar</button><button class="btn btn-pr" onclick="finalizarRec('${id}',${exts.length},[${exts.map((_,i)=>i).join(',')}])">✅ Confirmar recolección</button></div>`;
+  openM('m-mens-rec');
+}
+
+function prevRecFoto(inp){
+  if(!inp.files||!inp.files[0])return;
+  const reader=new FileReader();
+  reader.onload=ev=>{_recFoto=ev.target.result;const prev=ge('rec-foto-prev');if(prev)prev.innerHTML=`<img src="${_recFoto}" style="width:100%;max-height:200px;object-fit:cover;border-radius:10px;border:1px solid rgba(255,255,255,.1);">`};
+  reader.readAsDataURL(inp.files[0]);
+}
+
+function finalizarRec(id,totalExts,idxs){
+  if(!_recFoto){toast('Debes tomar una foto de lo que recoges','error');return;}
+  const r=DB.find('recolecciones',id);if(!r)return;
+  let totalIngresado=0;
+  for(const i of idxs){const el=ge('cant-rec-'+i);if(el)totalIngresado+=parseInt(el.value)||0;}
+  const obs=ge('rec-obs-mens')?.value?.trim()||'';
+  if(totalIngresado!==totalExts){
+    const diff=totalExts-totalIngresado;
+    const msg=diff>0?`Faltan ${diff} extintor(es) de los ${totalExts} esperados.`:`Se están recogiendo ${Math.abs(diff)} extintor(es) de más.`;
+    const novedad=`${msg} Esperado: ${totalExts}, Recogido: ${totalIngresado}. Obs: ${obs||'—'}`;
+    DB.save('recolecciones',{...r,novedad,novedadAutorizada:false,fotoRecoleccion:_recFoto,estado:'novedad'});
+    DB.save('alertas',{tipo:'novedad_recoleccion',mensaje:`⚠️ NOVEDAD recolección ${DB.find('clientes',r.clienteId)?.empresa||''}: ${msg} Mensajero: ${APP.user.nombre}`,usuarioDestino:'coordinador',leida:false});
+    toast('⚠️ Novedad registrada. Esperando autorización del coordinador.','error');
+    closeM('m-mens-rec');goTo('mensajero');return;
+  }
+  DB.save('recolecciones',{...r,estado:'completada',fotoRecoleccion:_recFoto,observaciones:obs,cantidadRecogida:totalIngresado,novedad:null,novedadAutorizada:null});
+  toast('✅ Recolección completada con éxito','success');
+  closeM('m-mens-rec');goTo('mensajero');
+}
+
+let _entFoto=null,_iDEnt=false,_lxEnt=0,_lyEnt=0;
+function abrirFlujEnt(id){
+  const e=DB.find('entregas',id);if(!e)return;
+  const cl=DB.find('clientes',e.clienteId)||{};
+  const exts=(e.extintores||[]).map(i=>DB.find('extintores',i)).filter(Boolean);
+  _entFoto=null;
+  ge('m-mens-ent-t').textContent=`🚚 Entrega — ${cl.empresa||''}`;
+  ge('m-mens-ent-b').innerHTML=`
+    <div style="margin-bottom:14px;background:#1c2330;border-radius:10px;padding:12px 16px;">
+      <div style="font-size:11px;color:#484f58;font-weight:700;text-transform:uppercase;margin-bottom:6px;">Extintores a entregar (${exts.length})</div>
+      ${exts.map(ex=>`<div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,.05);"><b style="color:#e6edf3;">${ex.serial}</b> <span style="color:#8b949e;font-size:12px;">— ${ex.tipo} ${ex.capacidad||''}</span></div>`).join('')||'<span style="color:#484f58;font-size:12px;">Sin extintores</span>'}
+    </div>
+    <div style="margin-bottom:14px;">
+      <div style="font-size:11px;color:#484f58;font-weight:700;text-transform:uppercase;margin-bottom:8px;">✍️ Firma del cliente <span style="color:#C8281E">*</span></div>
+      <canvas id="firma-ent" width="460" height="130" style="border:2px solid rgba(255,255,255,.15);border-radius:10px;background:#fff;cursor:crosshair;width:100%;touch-action:none;display:block;"></canvas>
+      <button class="btn btn-se btn-sm" onclick="limpFirmaEnt()" style="margin-top:6px;">🗑️ Limpiar firma</button>
+    </div>
+    <div style="margin-bottom:14px;">
+      <div style="font-size:11px;color:#484f58;font-weight:700;text-transform:uppercase;margin-bottom:8px;">📷 Foto de lo entregado (opcional)</div>
+      <div id="ent-foto-prev" style="margin-bottom:8px;"></div>
+      <label style="display:flex;align-items:center;gap:10px;background:#1c2330;border:1px dashed rgba(255,255,255,.2);border-radius:10px;padding:12px;cursor:pointer;"><span style="font-size:22px;">📷</span><span style="font-size:13px;color:#8b949e;">Toca para tomar foto</span><input type="file" accept="image/*" capture="environment" style="display:none" onchange="prevEntFoto(this)"></label>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px;"><button class="btn btn-se" onclick="closeM('m-mens-ent')">Cancelar</button><button class="btn btn-pr" onclick="finalizarEnt('${id}')">✅ Finalizar entrega</button></div>`;
+  openM('m-mens-ent');setTimeout(()=>initFirmaEnt(),300);
+}
+
+function prevEntFoto(inp){
+  if(!inp.files||!inp.files[0])return;
+  const reader=new FileReader();
+  reader.onload=ev=>{_entFoto=ev.target.result;const prev=ge('ent-foto-prev');if(prev)prev.innerHTML=`<img src="${_entFoto}" style="width:100%;max-height:160px;object-fit:cover;border-radius:10px;border:1px solid rgba(255,255,255,.1);">`};
+  reader.readAsDataURL(inp.files[0]);
+}
+
+function initFirmaEnt(){
+  const cv=ge('firma-ent');if(!cv)return;
+  const ctx=cv.getContext('2d');ctx.strokeStyle='#1a1a2e';ctx.lineWidth=2.5;ctx.lineCap='round';
+  const pos=ev=>{const r=cv.getBoundingClientRect(),sx=cv.width/r.width,sy=cv.height/r.height;return ev.touches?{x:(ev.touches[0].clientX-r.left)*sx,y:(ev.touches[0].clientY-r.top)*sy}:{x:(ev.clientX-r.left)*sx,y:(ev.clientY-r.top)*sy}};
+  cv.onmousedown=ev=>{_iDEnt=true;const p=pos(ev);_lxEnt=p.x;_lyEnt=p.y};
+  cv.onmousemove=ev=>{if(!_iDEnt)return;const p=pos(ev);ctx.beginPath();ctx.moveTo(_lxEnt,_lyEnt);ctx.lineTo(p.x,p.y);ctx.stroke();_lxEnt=p.x;_lyEnt=p.y};
+  cv.onmouseup=()=>_iDEnt=false;
+  cv.addEventListener('touchstart',ev=>{ev.preventDefault();_iDEnt=true;const p=pos(ev);_lxEnt=p.x;_lyEnt=p.y},{passive:false});
+  cv.addEventListener('touchmove',ev=>{ev.preventDefault();if(!_iDEnt)return;const p=pos(ev);ctx.beginPath();ctx.moveTo(_lxEnt,_lyEnt);ctx.lineTo(p.x,p.y);ctx.stroke();_lxEnt=p.x;_lyEnt=p.y},{passive:false});
+  cv.addEventListener('touchend',()=>_iDEnt=false);
+}
+function limpFirmaEnt(){const cv=ge('firma-ent');if(cv)cv.getContext('2d').clearRect(0,0,cv.width,cv.height);}
+
+function finalizarEnt(id){
+  const cv=ge('firma-ent');if(!cv){toast('Error al obtener firma','error');return;}
+  const ctx=cv.getContext('2d');
+  const px=ctx.getImageData(0,0,cv.width,cv.height).data;
+  const signed=px.some((v,i)=>i%4===3&&v>0);
+  if(!signed){toast('El cliente debe firmar antes de continuar','error');return;}
+  const firma=cv.toDataURL();
+  const e=DB.find('entregas',id);if(!e)return;
+  DB.save('entregas',{...e,estado:'completada',firmaCliente:firma,fotoEntrega:_entFoto||null});
+  toast('✅ Entrega completada con firma del cliente','success');
+  _entFoto=null;closeM('m-mens-ent');goTo('mensajero');
+}
+
+function confRec(id){DB.save('recolecciones',{...DB.find('recolecciones',id),estado:'completada'});toast('Confirmado ✓','success');goTo('mensajero');}
 
 function activarGPSManual(){
-  if(!APP.gps){
-    startGPS();
-  } else {
-    toast('GPS ya está activo','info');
-  }
+  if(!_gpsWatch){mensajeroActivarGPS();}else{toast('GPS ya está activo','info');}
 }
+
+function autorizarNovedad(recId){
+  if(!isC()){toast('Solo coordinadores pueden autorizar novedades','error');return;}
+  const r=DB.find('recolecciones',recId);if(!r)return;
+  DB.save('recolecciones',{...r,novedadAutorizada:true,estado:'completada'});
+  DB.all('alertas').filter(a=>a.tipo==='novedad_recoleccion'&&!a.leida).forEach(a=>DB.save('alertas',{...a,leida:true}));
+  toast('✅ Novedad autorizada. Recolección completada.','success');
+  goTo('recolecciones');
+}
+
 
 // ── MAPA ────────────────────────────────────────────────────────────────────
 let _mapaL = null, _mapaMarkers = {}, _mapaTimer = null;
