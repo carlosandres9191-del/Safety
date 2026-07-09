@@ -972,7 +972,18 @@ function showQR(id,serial){
 function dlQR(){ const img=ge('qr-img');if(!img)return;const a=document.createElement('a');a.href=img.src;a.download='qr.png';a.click() }
 
 // ── RECOLECCIONES ────────────────────────────────────────────────────────
-function pgRec(c){
+async function pgRec(c){
+  // Refrescar desde Supabase
+  try{
+    const [recs,cls,usrs]=await Promise.all([
+      sbGet('recolecciones'),
+      sbGet('clientes'),
+      sbGet('usuarios')
+    ]);
+    if(Array.isArray(recs)) C.set('recolecciones',recs);
+    if(Array.isArray(cls))  C.set('clientes',cls);
+    if(Array.isArray(usrs)) C.set('usuarios',usrs);
+  }catch(e){ console.warn('pgRec sb:',e); }
   const rc=DB.all('recolecciones'), cl=DB.all('clientes');
   const mens=DB.all('usuarios').filter(u=>u.activo&&(u.rol==='mensajero'||u.rol==='coordinador'||u.rol==='superadmin'));
   c.innerHTML=`<div style="padding:28px">
@@ -1046,20 +1057,34 @@ function pgRec(c){
       <div id="rec-exts" style="border:1.5px solid var(--border);border-radius:8px;padding:10px;max-height:160px;overflow-y:auto;font-size:13px;color:var(--ink3);margin-bottom:10px;">Selecciona un cliente para ver sus productos</div>
       <!-- AGREGAR PRODUCTO NUEVO -->
       <div id="panel-nuevo-ext" style="display:none;border-top:1px solid var(--border);padding-top:12px;margin-top:4px;">
-        <div style="font-size:11px;font-weight:700;color:var(--blue);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;">Agregar producto</div>
-        <div class="fg2">
-          <div class="fg"><label>Serial / Código <span class="req">*</span></label><input class="fc" id="next-serial" placeholder="Ej: EXT-001"></div>
-          <div class="fg"><label>Tipo <span class="req">*</span></label><select class="fc" id="next-tipo"><option value="">Seleccionar...</option><option>CO2</option><option>PQS</option><option>Agua</option><option>Espuma</option><option>Halón</option><option>Otro</option></select></div>
+        <div style="font-size:11px;font-weight:700;color:var(--blue);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;">Agregar producto a recoger</div>
+        <div class="fg">
+          <label>Nombre del producto / Extintor <span class="req">*</span></label>
+          <input class="fc" id="next-nombre" placeholder="Ej: Extintor de CO2, Extintor PQS...">
         </div>
-        <div class="fg2">
-          <div class="fg"><label>Capacidad</label><input class="fc" id="next-cap" placeholder="Ej: 10 lb"></div>
-          <div class="fg"><label>Ubicación en cliente</label><input class="fc" id="next-ubic" placeholder="Ej: Piso 2 - Bodega"></div>
+        <div class="fg">
+          <label>Tipo <span class="req">*</span></label>
+          <select class="fc" id="next-tipo">
+            <option value="">Seleccionar tipo...</option>
+            <option>CO2</option><option>PQS</option><option>Agua</option>
+            <option>Espuma</option><option>Halón</option><option>Otro</option>
+          </select>
         </div>
-        <div class="fg2">
-          <div class="fg"><label>MMT (presión)</label><input class="fc" id="next-mmt" type="number" placeholder="Ej: 195"></div>
-          <div class="fg"><label>Vencimiento</label><input class="fc" id="next-venc" type="date"></div>
+        <div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px;background:var(--bg);">
+          <div style="font-size:11px;font-weight:700;color:var(--ink3);text-transform:uppercase;margin-bottom:8px;">Código identificador</div>
+          <div class="fg2">
+            <div class="fg">
+              <label>Código QR / Serial</label>
+              <input class="fc" id="next-serial" placeholder="Escanea QR o escribe código">
+            </div>
+            <div class="fg">
+              <label>Código numérico</label>
+              <input class="fc" id="next-codigo" placeholder="Código numérico">
+            </div>
+          </div>
+          <div style="font-size:11px;color:var(--ink3);margin-top:4px;">💡 Si no tienes el código aún, déjalo vacío — quedará como <b>pendiente por asignar</b></div>
         </div>
-        <button class="btn btn-pr btn-sm" onclick="crearYAgregarExt()" style="margin-top:4px;">✅ Agregar producto a la orden</button>
+        <button class="btn btn-pr btn-sm" onclick="crearYAgregarExt()" style="margin-top:2px;">✅ Agregar producto a la orden</button>
         <div id="msg-nuevo-ext" style="margin-top:8px;font-size:12px;"></div>
       </div>
     </div>
@@ -1151,35 +1176,52 @@ function ldExtEnt(cid){
 function crearYAgregarExtEnt(){
   const cid=ge('ent-cl').value;
   if(!cid){toast('Selecciona un cliente primero','error');return;}
-  const serial=(ge('next-ent-serial')?.value||'').trim();
+  const nombre=(ge('next-ent-nombre')?.value||'').trim();
   const tipo=(ge('next-ent-tipo')?.value||'').trim();
-  if(!serial||!tipo){toast('Serial y tipo son obligatorios','error');return;}
+  if(!nombre){toast('Escribe el nombre del producto','error');return;}
+  if(!tipo){toast('Selecciona el tipo','error');return;}
+
+  const serial=(ge('next-ent-serial')?.value||'').trim();
+  const codigo=(ge('next-ent-codigo')?.value||'').trim();
+  const tieneCodigo=serial||codigo;
+  const serialFinal=serial||codigo||'PENDIENTE-'+Date.now();
 
   const nuevo=DB.save('extintores',{
     clienteId: cid,
-    serial,
+    serial: serialFinal,
+    nombre,
     tipo,
-    capacidad: ge('next-ent-cap')?.value?.trim()||'',
-    ubicacion: ge('next-ent-ubic')?.value?.trim()||'',
-    estado: 'activo'
+    capacidad: '',
+    ubicacion: '',
+    estado: tieneCodigo?'activo':'pendiente_codigo',
+    codigoAsignado: !!tieneCodigo
   });
+
+  const etiqueta=tieneCodigo?serial||codigo:'⏳ Código pendiente';
+  const badge=tieneCodigo
+    ?'<span style="font-size:10px;color:#52b788;background:rgba(82,183,136,.1);padding:2px 7px;border-radius:20px;">✓ Nuevo</span>'
+    :'<span style="font-size:10px;color:#f0883e;background:rgba(240,136,62,.1);padding:2px 7px;border-radius:20px;">⏳ Sin código</span>';
 
   const d=ge('ent-exts');
   if(d){
-    if(d.innerHTML.includes('no tiene productos')||d.innerHTML.includes('Selecciona un cliente'))
-      d.innerHTML=`<div style="font-size:11px;color:var(--ink3);margin-bottom:6px;">Selecciona los que vas a entregar:</div>`;
+    if(d.innerHTML.includes('no tiene productos')||d.innerHTML.includes('Selecciona un cliente')||d.innerHTML.includes('primero'))
+      d.innerHTML='<div style="font-size:11px;color:var(--ink3);margin-bottom:6px;">Selecciona los que vas a entregar:</div>';
     const lbl=document.createElement('label');
-    lbl.style.cssText='display:flex;align-items:center;gap:8px;padding:5px 0;cursor:pointer;border-bottom:1px solid var(--border);';
+    lbl.style.cssText='display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;border-bottom:1px solid var(--border);';
     lbl.innerHTML=`<input type="checkbox" name="entx" value="${nuevo.id}" checked style="width:16px;height:16px;accent-color:var(--red);">
-      <div style="flex:1;"><span style="font-weight:700;">${serial}</span><span style="color:var(--ink3);font-size:12px;"> — ${tipo} ${nuevo.capacidad}</span></div>
-      <span style="font-size:10px;color:#52b788;background:rgba(82,183,136,.1);padding:2px 6px;border-radius:20px;">✓ Nuevo</span>`;
+      <div style="flex:1;">
+        <span style="font-weight:700;">${nombre}</span>
+        <span style="color:var(--ink3);font-size:12px;"> — ${tipo}</span><br>
+        <span style="font-size:11px;color:var(--ink3);">${etiqueta}</span>
+      </div>${badge}`;
     d.appendChild(lbl);
   }
-  ['next-ent-serial','next-ent-cap','next-ent-ubic'].forEach(id=>{const el=ge(id);if(el)el.value='';});
+
+  ['next-ent-nombre','next-ent-serial','next-ent-codigo'].forEach(id=>{const el=ge(id);if(el)el.value='';});
   const sel=ge('next-ent-tipo');if(sel)sel.value='';
   const msg=ge('msg-nuevo-ext-ent');
-  if(msg) msg.innerHTML=`<span style="color:#52b788;">✓ Producto <b>${serial}</b> creado y añadido</span>`;
-  toast(`Producto ${serial} agregado ✓`,'success');
+  if(msg) msg.innerHTML=`<span style="color:#52b788;">✓ <b>${nombre}</b> agregado${tieneCodigo?'':' — código pendiente por asignar'}</span>`;
+  toast(`${nombre} agregado ✓`,'success');
 }
 
 function ldExtR(cid){
@@ -1213,45 +1255,55 @@ function ldExtR(cid){
 function crearYAgregarExt(){
   const cid=ge('rec-cl').value;
   if(!cid){toast('Selecciona un cliente primero','error');return;}
-  const serial=(ge('next-serial')?.value||'').trim();
+  const nombre=(ge('next-nombre')?.value||'').trim();
   const tipo=(ge('next-tipo')?.value||'').trim();
-  if(!serial||!tipo){toast('Serial y tipo son obligatorios','error');return;}
+  if(!nombre){toast('Escribe el nombre del producto','error');return;}
+  if(!tipo){toast('Selecciona el tipo','error');return;}
+
+  const serial=(ge('next-serial')?.value||'').trim();
+  const codigo=(ge('next-codigo')?.value||'').trim();
+  const tieneCodigo=serial||codigo;
+  const serialFinal=serial||codigo||'PENDIENTE-'+Date.now();
 
   const msg=ge('msg-nuevo-ext');
-  if(msg) msg.innerHTML='<span style="color:var(--ink3)">Creando extintor...</span>';
+  if(msg) msg.innerHTML='<span style="color:var(--ink3)">Guardando...</span>';
 
   const nuevoExt={
     clienteId: cid,
-    serial,
+    serial: serialFinal,
+    nombre: nombre,
     tipo,
-    capacidad: ge('next-cap')?.value?.trim()||'',
-    ubicacion: ge('next-ubic')?.value?.trim()||'',
-    mmt: parseInt(ge('next-mmt')?.value)||0,
-    fechaVencimiento: ge('next-venc')?.value||'',
-    estado: 'activo'
+    capacidad: '',
+    ubicacion: '',
+    estado: tieneCodigo?'activo':'pendiente_codigo',
+    codigoAsignado: !!tieneCodigo
   };
 
-  const guardado = DB.save('extintores', nuevoExt);
+  const guardado=DB.save('extintores',nuevoExt);
+  const etiqueta=tieneCodigo?serial||codigo:'⏳ Código pendiente';
+  const badge=tieneCodigo
+    ?'<span style="font-size:10px;color:#52b788;background:rgba(82,183,136,.1);padding:2px 7px;border-radius:20px;">✓ Nuevo</span>'
+    :'<span style="font-size:10px;color:#f0883e;background:rgba(240,136,62,.1);padding:2px 7px;border-radius:20px;">⏳ Sin código</span>';
 
-  // Agregar checkbox a la lista existente
   const d=ge('rec-exts');
   if(d){
-    // Limpiar mensaje de "sin extintores"
-    if(d.innerHTML.includes('no tiene extintores') || d.innerHTML.includes('Selecciona un cliente'))
-      d.innerHTML=`<div style="font-size:11px;color:var(--ink3);margin-bottom:6px;">Selecciona los que vas a recoger:</div>`;
+    if(d.innerHTML.includes('no tiene productos')||d.innerHTML.includes('Selecciona un cliente')||d.innerHTML.includes('primero'))
+      d.innerHTML='<div style="font-size:11px;color:var(--ink3);margin-bottom:6px;">Selecciona los que vas a recoger:</div>';
     const lbl=document.createElement('label');
-    lbl.style.cssText='display:flex;align-items:center;gap:8px;padding:5px 0;cursor:pointer;border-bottom:1px solid var(--border);';
+    lbl.style.cssText='display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;border-bottom:1px solid var(--border);';
     lbl.innerHTML=`<input type="checkbox" name="rex" value="${guardado.id}" checked style="width:16px;height:16px;accent-color:var(--red);">
-      <div style="flex:1;"><span style="font-weight:700;">${serial}</span><span style="color:var(--ink3);font-size:12px;"> — ${tipo} ${nuevoExt.capacidad} ${nuevoExt.ubicacion?'· '+nuevoExt.ubicacion:''}</span></div>
-      <span style="font-size:10px;color:#52b788;background:rgba(82,183,136,.1);padding:2px 6px;border-radius:20px;">✓ Nuevo</span>`;
+      <div style="flex:1;">
+        <span style="font-weight:700;">${nombre}</span>
+        <span style="color:var(--ink3);font-size:12px;"> — ${tipo}</span><br>
+        <span style="font-size:11px;color:var(--ink3);">${etiqueta}</span>
+      </div>${badge}`;
     d.appendChild(lbl);
   }
 
-  // Limpiar campos del formulario de nuevo extintor
-  ['next-serial','next-cap','next-ubic','next-mmt','next-venc'].forEach(id=>{const el=ge(id);if(el)el.value='';});
+  ['next-nombre','next-serial','next-codigo'].forEach(id=>{const el=ge(id);if(el)el.value='';});
   const sel=ge('next-tipo');if(sel)sel.value='';
-  if(msg) msg.innerHTML=`<span style="color:#52b788;">✓ Extintor <b>${serial}</b> creado y añadido a la orden</span>`;
-  toast(`Extintor ${serial} creado ✓`,'success');
+  if(msg) msg.innerHTML=`<span style="color:#52b788;">✓ <b>${nombre}</b> agregado${tieneCodigo?'':' — código pendiente por asignar'}</span>`;
+  toast(`${nombre} agregado a la orden ✓`,'success');
 }
 
 function mRec(){
@@ -1329,7 +1381,15 @@ function confirmarAsignacion(ordenId, tipo, btn){
 function delRec(id){ confirmSA('Eliminar recolección',()=>{DB.del('recolecciones',id);toast('Eliminada','success');goTo('recolecciones')}) }
 
 // ── ENTREGAS ─────────────────────────────────────────────────────────────
-function pgEnt(c){
+async function pgEnt(c){
+  try{
+    const [ents,cls,usrs]=await Promise.all([
+      sbGet('entregas'),sbGet('clientes'),sbGet('usuarios')
+    ]);
+    if(Array.isArray(ents)) C.set('entregas',ents);
+    if(Array.isArray(cls))  C.set('clientes',cls);
+    if(Array.isArray(usrs)) C.set('usuarios',usrs);
+  }catch(e){ console.warn('pgEnt sb:',e); }
   const en=DB.all('entregas');
   c.innerHTML=`<div style="padding:28px">
   <div class="ph"><div><div class="ph-t">🚚 Entregas</div><div class="ph-s">${en.filter(e=>e.estado==='pendiente').length} pendientes</div></div><div class="ph-a"><button class="btn btn-pr" onclick="mEnt()">+ Nueva entrega</button></div></div>
@@ -1382,16 +1442,34 @@ function pgEnt(c){
       <div id="ent-exts" style="border:1.5px solid var(--border);border-radius:8px;padding:10px;max-height:160px;overflow-y:auto;font-size:13px;color:var(--ink3);margin-bottom:10px;">Selecciona un cliente para ver sus productos</div>
       <!-- AGREGAR PRODUCTO NUEVO -->
       <div id="panel-nuevo-ext-ent" style="display:none;border-top:1px solid var(--border);padding-top:12px;margin-top:4px;">
-        <div style="font-size:11px;font-weight:700;color:var(--blue);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;">Agregar producto</div>
-        <div class="fg2">
-          <div class="fg"><label>Serial / Código <span class="req">*</span></label><input class="fc" id="next-ent-serial" placeholder="Ej: EXT-001"></div>
-          <div class="fg"><label>Tipo <span class="req">*</span></label><select class="fc" id="next-ent-tipo"><option value="">Seleccionar...</option><option>CO2</option><option>PQS</option><option>Agua</option><option>Espuma</option><option>Halón</option><option>Otro</option></select></div>
+        <div style="font-size:11px;font-weight:700;color:var(--blue);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;">Agregar producto a entregar</div>
+        <div class="fg">
+          <label>Nombre del producto / Extintor <span class="req">*</span></label>
+          <input class="fc" id="next-ent-nombre" placeholder="Ej: Extintor de CO2, Extintor PQS...">
         </div>
-        <div class="fg2">
-          <div class="fg"><label>Capacidad</label><input class="fc" id="next-ent-cap" placeholder="Ej: 10 lb"></div>
-          <div class="fg"><label>Ubicación</label><input class="fc" id="next-ent-ubic" placeholder="Ej: Piso 2 - Oficina"></div>
+        <div class="fg">
+          <label>Tipo <span class="req">*</span></label>
+          <select class="fc" id="next-ent-tipo">
+            <option value="">Seleccionar tipo...</option>
+            <option>CO2</option><option>PQS</option><option>Agua</option>
+            <option>Espuma</option><option>Halón</option><option>Otro</option>
+          </select>
         </div>
-        <button class="btn btn-pr btn-sm" onclick="crearYAgregarExtEnt()" style="margin-top:4px;">✅ Agregar producto a la entrega</button>
+        <div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px;background:var(--bg);">
+          <div style="font-size:11px;font-weight:700;color:var(--ink3);text-transform:uppercase;margin-bottom:8px;">Código identificador</div>
+          <div class="fg2">
+            <div class="fg">
+              <label>Código QR / Serial</label>
+              <input class="fc" id="next-ent-serial" placeholder="Escanea QR o escribe código">
+            </div>
+            <div class="fg">
+              <label>Código numérico</label>
+              <input class="fc" id="next-ent-codigo" placeholder="Código numérico">
+            </div>
+          </div>
+          <div style="font-size:11px;color:var(--ink3);margin-top:4px;">💡 Si no tienes el código, déjalo vacío — quedará <b>pendiente por asignar</b></div>
+        </div>
+        <button class="btn btn-pr btn-sm" onclick="crearYAgregarExtEnt()" style="margin-top:2px;">✅ Agregar producto a la entrega</button>
         <div id="msg-nuevo-ext-ent" style="margin-top:8px;font-size:12px;"></div>
       </div>
     </div>
@@ -1543,8 +1621,8 @@ async function pgMens(c){
   // Siempre traer datos frescos de Supabase
   try{
     const [recs,ents,cls,exts]=await Promise.all([
-      sbGet('recolecciones',`&mensajeroId=eq.${u.id}`),
-      sbGet('entregas',`&mensajeroId=eq.${u.id}`),
+      sbGet('recolecciones',`&mensajeroId=eq.${u.id}&estado=not.in.(completada,cancelada,recolectado)`),
+      sbGet('entregas',`&mensajeroId=eq.${u.id}&estado=not.in.(completada,cancelada,entregado)`),
       sbGet('clientes'),
       sbGet('extintores')
     ]);
@@ -1965,8 +2043,10 @@ async function finalizarRecConFirma(id){
     const cuerpo=encodeURIComponent(`Estimado cliente,\n\nExtintores Safety S.A.S realizó la recolección el ${new Date().toLocaleDateString('es-CO')}.\n\nInventario recolectado:\n${inventarioTexto}\n${_recObs?'\nObservaciones: '+_recObs:''}\n\nMensajero: ${APP.user.nombre}\n\nGracias por su confianza.\nExtintores Safety S.A.S\nPBX: 444 75 71`);
     window.open(`mailto:${email}?subject=${asunto}&body=${cuerpo}`,'_blank');
     toast(`✅ Guardado en Supabase. Se abrió el correo para ${email}`,'success');
+  setTimeout(()=>{ if(ge('pg')) pgMens(ge('pg')); },600);
   }catch(err){
     toast('✅ Recolección guardada en Supabase','success');
+  setTimeout(()=>{ if(ge('pg')) pgMens(ge('pg')); },600);
   }
 
   _recFotos=[];_recExtsConf=[];_recHayNov=false;_recObs='';_recCants={};
