@@ -2153,78 +2153,88 @@ function abrirVerificacionRec(id){
   let cantidades=[];
   try{ cantidades=JSON.parse(r.cantidades||'[]'); }catch(e){}
 
-  // Crear modal dinámico
+  // Construir lista de productos con su estado de verificación
+  const items = cantidades.length
+    ? cantidades.map(c=>({ serial:c.serial, tipo:c.tipo||'', capacidad:c.capacidad||'', cant:c.cantRecogida, extObj: exts.find(e=>e.serial===c.serial)||null }))
+    : exts.map(e=>({ serial:e.serial, tipo:e.tipo||'', capacidad:e.capacidad||'', cant:1, extObj:e }));
+
   let ov=ge('m-verif-rec');
   if(!ov){ ov=document.createElement('div'); ov.id='m-verif-rec'; ov.className='ov'; document.body.appendChild(ov); }
-  ov.innerHTML=`<div class="modal lg" style="max-height:93vh;overflow-y:auto;width:640px;">
+
+  ov.innerHTML=`<div class="modal lg" style="max-height:93vh;overflow-y:auto;width:680px;">
     <div class="mh"><span class="mt">📋 Verificar ingreso a bodega</span><button class="mc btn" onclick="closeOv('m-verif-rec')">✕</button></div>
     <div class="mb">
 
-      <!-- INFO ORDEN -->
-      <div style="background:var(--surface);border-radius:10px;padding:14px;margin-bottom:16px;display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px;">
-        <div><div style="font-size:10px;color:var(--ink3);font-weight:700;text-transform:uppercase;margin-bottom:3px;">Cliente</div><div style="font-weight:700;">${cl.empresa||'—'}</div></div>
-        <div><div style="font-size:10px;color:var(--ink3);font-weight:700;text-transform:uppercase;margin-bottom:3px;">Mensajero</div><div>${DB.find('usuarios',r.mensajeroId)?.nombre||'—'}</div></div>
-        <div><div style="font-size:10px;color:var(--ink3);font-weight:700;text-transform:uppercase;margin-bottom:3px;">Fecha recolección</div><div>${r.fechaRecoleccion?new Date(r.fechaRecoleccion).toLocaleString('es-CO'):'—'}</div></div>
-        <div><div style="font-size:10px;color:var(--ink3);font-weight:700;text-transform:uppercase;margin-bottom:3px;">Estado</div><div>${oB(r.estado)}</div></div>
+      <!-- INFO -->
+      <div style="background:var(--surface);border-radius:10px;padding:14px;margin-bottom:14px;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;">
+        <div><div style="font-size:10px;color:var(--ink3);font-weight:700;text-transform:uppercase;margin-bottom:2px;">Cliente</div><b>${cl.empresa||'—'}</b></div>
+        <div><div style="font-size:10px;color:var(--ink3);font-weight:700;text-transform:uppercase;margin-bottom:2px;">Mensajero</div>${DB.find('usuarios',r.mensajeroId)?.nombre||'—'}</div>
+        <div><div style="font-size:10px;color:var(--ink3);font-weight:700;text-transform:uppercase;margin-bottom:2px;">Fecha</div>${r.fechaRecoleccion?new Date(r.fechaRecoleccion).toLocaleString('es-CO'):'—'}</div>
+        <div><div style="font-size:10px;color:var(--ink3);font-weight:700;text-transform:uppercase;margin-bottom:2px;">Estado</div>${oB(r.estado)}</div>
       </div>
 
-      ${r.observaciones?`<div style="background:var(--surface);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:var(--ink3);"><b>Observaciones del mensajero:</b> ${r.observaciones}</div>`:''}
-      ${r.novedad?`<div style="background:rgba(240,136,62,.1);border-left:3px solid #f0883e;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#f0883e;"><b>⚠️ Novedad registrada:</b> ${r.novedad}</div>`:''}
+      ${r.novedad?`<div style="background:rgba(240,136,62,.1);border-left:3px solid #f0883e;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:#f0883e;">⚠️ <b>Novedad:</b> ${r.novedad}</div>`:''}
+      ${r.observaciones?`<div style="background:var(--surface);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:var(--ink3);"><b>Obs:</b> ${r.observaciones}</div>`:''}
 
-      <!-- FOTO DEL MENSAJERO -->
-      ${r.fotoRecoleccion?`<div style="margin-bottom:16px;">
-        <div style="font-size:11px;font-weight:700;color:var(--ink3);text-transform:uppercase;margin-bottom:8px;">📷 Foto tomada por el mensajero</div>
-        <img src="${r.fotoRecoleccion}" style="width:100%;max-height:220px;object-fit:cover;border-radius:10px;border:1px solid var(--border);">
+      <!-- FOTO Y FIRMA -->
+      ${r.fotoRecoleccion||r.firmaCliente?`<div style="display:grid;grid-template-columns:${r.fotoRecoleccion&&r.firmaCliente?'1fr 1fr':'1fr'};gap:12px;margin-bottom:14px;">
+        ${r.fotoRecoleccion?`<div><div style="font-size:10px;font-weight:700;color:var(--ink3);text-transform:uppercase;margin-bottom:6px;">📷 Foto mensajero</div><img src="${r.fotoRecoleccion}" style="width:100%;max-height:160px;object-fit:cover;border-radius:8px;border:1px solid var(--border);"></div>`:''}
+        ${r.firmaCliente?`<div><div style="font-size:10px;font-weight:700;color:var(--ink3);text-transform:uppercase;margin-bottom:6px;">✍️ Firma cliente</div><div style="background:#fff;border-radius:8px;padding:6px;border:1px solid var(--border);"><img src="${r.firmaCliente}" style="width:100%;max-height:100px;object-fit:contain;"></div></div>`:''}
       </div>`:''}
 
-      <!-- FIRMA DEL CLIENTE -->
-      ${r.firmaCliente?`<div style="margin-bottom:16px;">
-        <div style="font-size:11px;font-weight:700;color:var(--ink3);text-transform:uppercase;margin-bottom:8px;">✍️ Firma del cliente</div>
-        <div style="background:#fff;border-radius:10px;padding:8px;border:1px solid var(--border);">
-          <img src="${r.firmaCliente}" style="width:100%;max-height:120px;object-fit:contain;">
-        </div>
-      </div>`:''}
-
-      <!-- INVENTARIO RECOLECTADO -->
-      <div style="margin-bottom:16px;">
-        <div style="font-size:11px;font-weight:700;color:var(--ink3);text-transform:uppercase;margin-bottom:10px;">🧯 Inventario recolectado por el mensajero</div>
-        ${cantidades.length?cantidades.map((item,i)=>`
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--surface);border-radius:8px;margin-bottom:6px;border:1px solid var(--border);">
-          <div style="display:flex;align-items:center;gap:10px;">
-            <div style="width:22px;height:22px;background:rgba(82,183,136,.15);border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#52b788;">${i+1}</div>
-            <div>
-              <div style="font-size:13px;font-weight:700;">${item.serial}</div>
-              <div style="font-size:11px;color:var(--ink3);">${item.tipo||''} ${item.capacidad||''}</div>
+      <!-- PRODUCTOS UNO A UNO CON VERIFICACIÓN INDIVIDUAL -->
+      <div style="font-size:11px;font-weight:700;color:var(--ink3);text-transform:uppercase;margin-bottom:10px;">🧯 Productos — verificar uno a uno</div>
+      <div id="verif-items-lista">
+        ${items.map((item,i)=>`
+        <div id="verif-item-${i}" style="border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:8px;background:var(--surface);">
+          <!-- CABECERA PRODUCTO -->
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+            <div style="display:flex;align-items:center;gap:10px;">
+              <div style="width:28px;height:28px;background:var(--surface);border:1px solid var(--border);border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--ink2);">${i+1}</div>
+              <div>
+                <div style="font-size:13px;font-weight:700;">${item.serial==='PENDIENTE-'||item.serial?.startsWith('PENDIENTE-')?'Sin código asignado':item.serial}</div>
+                <div style="font-size:11px;color:var(--ink3);">${item.tipo} ${item.capacidad} · ${item.cant} unid.</div>
+              </div>
             </div>
+            <div id="verif-badge-${i}" style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;background:rgba(255,255,255,.05);color:var(--ink3);">⏳ Pendiente</div>
           </div>
-          <div style="text-align:right;">
-            <div style="font-size:16px;font-weight:800;color:#52b788;">${item.cantRecogida}</div>
-            <div style="font-size:10px;color:var(--ink3);">unid. recogidas</div>
-          </div>
-        </div>`).join('')
-        : exts.map((e,i)=>`
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--surface);border-radius:8px;margin-bottom:6px;border:1px solid var(--border);">
-          <div style="display:flex;align-items:center;gap:10px;">
-            <div style="width:22px;height:22px;background:rgba(82,183,136,.15);border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#52b788;">${i+1}</div>
-            <div><div style="font-size:13px;font-weight:700;">${e.serial}</div><div style="font-size:11px;color:var(--ink3);">${e.tipo||''} ${e.capacidad||''}</div></div>
+
+          <!-- OPCIONES DE VERIFICACIÓN -->
+          <div id="verif-opts-${i}">
+            ${item.serial?.startsWith('PENDIENTE-')||!item.serial?`
+            <!-- SIN CÓDIGO — opciones para asignar -->
+            <div style="background:rgba(240,136,62,.08);border:1px solid rgba(240,136,62,.2);border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:#f0883e;">
+              ⚠️ Este producto no tiene código asignado
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+              <button class="btn btn-se btn-sm" onclick="mostrarAsignarCodigo(${i},'${item.extObj?.id||''}')">📱 Escanear/Asignar QR</button>
+              <button class="btn btn-pr btn-sm" onclick="generarHojaVida(${i},'${item.extObj?.id||''}','${r.id}')">📄 Generar hoja de vida</button>
+            </div>
+            <div id="verif-asignar-${i}" style="display:none;margin-top:10px;">
+              <div style="display:flex;gap:6px;">
+                <input class="fc" id="codigo-nuevo-${i}" placeholder="Escanea QR o escribe código..." style="flex:1;" onkeydown="if(event.key==='Enter')asignarCodigoProducto(${i},'${item.extObj?.id||''}')">
+                <button class="btn btn-pr btn-sm" onclick="asignarCodigoProducto(${i},'${item.extObj?.id||''}')">✓ Asignar</button>
+              </div>
+            </div>`:`
+            <!-- CON CÓDIGO — verificar por QR o manual -->
+            <div style="display:flex;gap:6px;align-items:center;">
+              <input class="fc" id="input-verif-${i}" placeholder="Escanea QR o escribe código para verificar..." style="flex:1;" onkeydown="if(event.key==='Enter')verificarProducto(${i},'${item.serial}','${item.extObj?.id||''}')">
+              <button class="btn btn-pr btn-sm" onclick="verificarProducto(${i},'${item.serial}','${item.extObj?.id||''}')">✓ Verificar</button>
+            </div>
+            <div style="font-size:11px;color:var(--ink3);margin-top:5px;">Código esperado: <b>${item.serial}</b></div>`}
+            <div id="verif-msg-${i}" style="margin-top:6px;font-size:12px;min-height:14px;"></div>
           </div>
         </div>`).join('')}
       </div>
 
-      <!-- VERIFICACIÓN QR / CÓDIGO -->
-      <div style="border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px;background:var(--surface);">
-        <div style="font-size:12px;font-weight:700;color:var(--ink2);margin-bottom:12px;">📱 Verificar dispositivo en bodega (QR o código)</div>
-        <div style="display:flex;gap:8px;margin-bottom:10px;">
-          <input class="fc" id="verif-codigo" placeholder="Escanea QR o escribe código serial..." style="flex:1;" onkeydown="if(event.key==='Enter')checkDispositivoBodega()">
-          <button class="btn btn-pr" onclick="checkDispositivoBodega()">✓ Verificar</button>
-        </div>
-        <div id="verif-resultado" style="font-size:13px;min-height:20px;"></div>
-        <div id="verif-lista" style="margin-top:10px;"></div>
+      <!-- CONTADOR PROGRESO -->
+      <div id="verif-progreso" style="background:var(--surface);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;text-align:center;color:var(--ink3);">
+        <span id="verif-cnt">0</span> de ${items.length} productos verificados
       </div>
 
-      <!-- ACCIONES FINALES -->
-      <div style="border:1px solid var(--border);border-radius:10px;padding:16px;background:var(--surface);">
-        <div style="font-size:12px;font-weight:700;color:var(--ink2);margin-bottom:12px;">⚡ Acciones</div>
+      <!-- ACCIONES -->
+      <div style="border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--surface);">
+        <div style="font-size:11px;font-weight:700;color:var(--ink2);text-transform:uppercase;margin-bottom:10px;">⚡ Acciones</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <button class="btn btn-pr" onclick="generarOrdenLab('${r.id}')">🔬 Generar orden de laboratorio</button>
           <button class="btn btn-se" onclick="marcarEnBodega('${r.id}')">📦 Confirmar en bodega</button>
@@ -2235,9 +2245,147 @@ function abrirVerificacionRec(id){
     </div>
   </div>`;
   ov.classList.add('open');
-  // Inicializar lista verificados
-  window._verifRec={id,exts,cantidades,verificados:{}};
+  window._verifRec={ id, items, verificados:{}, total:items.length };
 }
+
+function verificarProducto(idx, serialEsperado, extId){
+  const inp=ge('input-verif-'+idx); if(!inp) return;
+  const codigo=(inp.value||'').trim().replace(/\s/g,'');
+  const msg=ge('verif-msg-'+idx);
+  const badge=ge('verif-badge-'+idx);
+
+  if(!codigo){toast('Ingresa o escanea el código','error');return;}
+
+  const coincide = codigo.toLowerCase()===serialEsperado.toLowerCase()
+    || codigo.toLowerCase()===serialEsperado.replace(/[-\s]/g,'').toLowerCase();
+
+  if(coincide){
+    // Verificado OK
+    badge.style.cssText='font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;background:rgba(82,183,136,.15);color:#52b788;';
+    badge.textContent='✅ Verificado';
+    msg.innerHTML='<span style="color:#52b788;">✓ Código correcto — producto en bodega</span>';
+    ge('verif-item-'+idx).style.borderColor='rgba(82,183,136,.4)';
+    inp.disabled=true;
+    // Actualizar extintor en Supabase
+    if(extId){ const e=DB.find('extintores',extId); if(e) DB.save('extintores',{...e,estado:'en_bodega'}); }
+    window._verifRec.verificados[idx]=true;
+  } else {
+    // Código no coincide
+    badge.style.cssText='font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;background:rgba(248,81,73,.1);color:#f85149;';
+    badge.textContent='❌ No coincide';
+    msg.innerHTML=`<span style="color:#f85149;">✗ Código ingresado: <b>${codigo}</b> — Esperado: <b>${serialEsperado}</b></span>`;
+    ge('verif-item-'+idx).style.borderColor='rgba(248,81,73,.35)';
+  }
+  actualizarContadorVerif();
+  inp.value='';
+}
+
+function mostrarAsignarCodigo(idx, extId){
+  const div=ge('verif-asignar-'+idx);
+  if(div){ div.style.display=div.style.display==='none'?'block':'none'; }
+  const inp=ge('codigo-nuevo-'+idx);
+  if(inp) setTimeout(()=>inp.focus(),100);
+}
+
+function asignarCodigoProducto(idx, extId){
+  const inp=ge('codigo-nuevo-'+idx); if(!inp) return;
+  const codigo=(inp.value||'').trim();
+  if(!codigo){toast('Ingresa un código','error');return;}
+  const msg=ge('verif-msg-'+idx);
+  const badge=ge('verif-badge-'+idx);
+
+  // Actualizar extintor con nuevo código
+  if(extId){
+    const e=DB.find('extintores',extId)||{id:extId};
+    DB.save('extintores',{...e, serial:codigo, estado:'en_bodega', codigoAsignado:true});
+  }
+  badge.style.cssText='font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;background:rgba(82,183,136,.15);color:#52b788;';
+  badge.textContent='✅ Código asignado';
+  msg.innerHTML=`<span style="color:#52b788;">✓ Código <b>${codigo}</b> asignado — producto en bodega</span>`;
+  ge('verif-item-'+idx).style.borderColor='rgba(82,183,136,.4)';
+  ge('verif-asignar-'+idx).style.display='none';
+  window._verifRec.verificados[idx]=true;
+  actualizarContadorVerif();
+  toast(`Código ${codigo} asignado ✓`,'success');
+}
+
+function generarHojaVida(idx, extId, recId){
+  if(!extId&&!recId){toast('Sin referencia de producto','error');return;}
+  const e=extId?DB.find('extintores',extId):null;
+  const r=DB.find('recolecciones',recId)||{};
+  const cl=DB.find('clientes',r.clienteId)||{};
+
+  const ov=document.createElement('div'); ov.className='ov open'; ov.style.zIndex='9999';
+  ov.innerHTML=`<div class="modal" style="width:500px;">
+    <div class="mh"><span class="mt">📄 Generar hoja de vida</span><button class="mc btn" onclick="this.closest('.ov').remove()">✕</button></div>
+    <div class="mb">
+      <div style="font-size:12px;color:var(--ink3);margin-bottom:14px;">Completa los datos para crear la hoja de vida y asignar el código</div>
+      <div class="fg2">
+        <div class="fg"><label>Código / Serial <span class="req">*</span></label><input class="fc" id="hv-serial" placeholder="Asigna un código"></div>
+        <div class="fg"><label>Tipo</label><select class="fc" id="hv-tipo"><option value="">Seleccionar...</option><option>CO2</option><option>PQS</option><option>Agua</option><option>Espuma</option><option>Halón</option><option>Otro</option></select></div>
+      </div>
+      <div class="fg2">
+        <div class="fg"><label>Capacidad</label><input class="fc" id="hv-cap" placeholder="Ej: 10 lb"></div>
+        <div class="fg"><label>Marca</label><input class="fc" id="hv-marca" placeholder="Ej: Amerex"></div>
+      </div>
+      <div class="fg2">
+        <div class="fg"><label>Fecha fabricación</label><input class="fc" id="hv-fab" type="date"></div>
+        <div class="fg"><label>Fecha vencimiento</label><input class="fc" id="hv-venc" type="date"></div>
+      </div>
+      <div class="fg"><label>Ubicación en cliente</label><input class="fc" id="hv-ubic" placeholder="Ej: Piso 2 - Bodega"></div>
+      <div class="fg"><label>Observaciones</label><textarea class="fc" id="hv-obs" rows="2" placeholder="Estado inicial, daños visibles..."></textarea></div>
+    </div>
+    <div class="mf">
+      <button class="btn btn-se" onclick="this.closest('.ov').remove()">Cancelar</button>
+      <button class="btn btn-pr" onclick="guardarHojaVida(${idx},'${extId}','${recId}',this)">📄 Crear hoja de vida</button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+}
+
+function guardarHojaVida(idx, extId, recId, btn){
+  const serial=(ge('hv-serial')?.value||'').trim();
+  if(!serial){toast('El código es obligatorio','error');return;}
+  const r=DB.find('recolecciones',recId)||{};
+  const datos={
+    serial,
+    tipo:      ge('hv-tipo')?.value||'',
+    capacidad: ge('hv-cap')?.value?.trim()||'',
+    marca:     ge('hv-marca')?.value?.trim()||'',
+    fechaFabricacion: ge('hv-fab')?.value||'',
+    fechaVencimiento: ge('hv-venc')?.value||'',
+    ubicacion: ge('hv-ubic')?.value?.trim()||'',
+    observaciones: ge('hv-obs')?.value?.trim()||'',
+    clienteId: r.clienteId||'',
+    estado:    'en_bodega',
+    codigoAsignado: true
+  };
+  if(extId){ DB.save('extintores',{...DB.find('extintores',extId)||{id:extId},...datos}); }
+  else      { DB.save('extintores',datos); }
+
+  btn.closest('.ov').remove();
+  // Actualizar badge del item
+  const badge=ge('verif-badge-'+idx);
+  if(badge){
+    badge.style.cssText='font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;background:rgba(82,183,136,.15);color:#52b788;';
+    badge.textContent='✅ HV Generada';
+  }
+  const msg=ge('verif-msg-'+idx);
+  if(msg) msg.innerHTML=`<span style="color:#52b788;">✓ Hoja de vida creada · Código: <b>${serial}</b></span>`;
+  if(ge('verif-item-'+idx)) ge('verif-item-'+idx).style.borderColor='rgba(82,183,136,.4)';
+  if(window._verifRec) window._verifRec.verificados[idx]=true;
+  actualizarContadorVerif();
+  toast(`Hoja de vida generada — Código: ${serial} ✓`,'success');
+}
+
+function actualizarContadorVerif(){
+  const cnt=ge('verif-cnt');
+  if(!cnt||!window._verifRec) return;
+  const n=Object.keys(window._verifRec.verificados).length;
+  cnt.textContent=n;
+  cnt.style.color=n===window._verifRec.total?'#52b788':'var(--ink3)';
+}
+
 
 function closeOv(id){ const el=ge(id); if(el){el.classList.remove('open');} }
 
