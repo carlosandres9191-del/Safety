@@ -1013,13 +1013,38 @@ function prtHV(){
 function showQR(id,serial){
   const e=DB.find('extintores',id);
   const cliente=e?cN(e.clienteId):'—';
-  APP.qrCurrent={id,serial,cliente};
   const url=`${location.origin}${location.pathname}?e=${id}`;
   const qrUrl=`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(url)}`;
+  APP.qrCurrent={id,serial,cliente,qrUrl};
   ge('m-qr-b').innerHTML=`<div style="background:var(--surface);border-radius:12px;padding:20px;border:2px dashed var(--border)"><div style="font-weight:700;font-size:14px;margin-bottom:10px">${cliente}</div><img id="qr-img" src="${qrUrl}" style="width:200px;height:200px;border-radius:10px"><br><div style="font-weight:700;margin-top:10px">${serial}</div><div style="font-size:11px;color:var(--ink3);margin-top:4px;word-break:break-all">${url}</div></div>`;
   openM('m-qr');
 }
-function dlQR(){ const img=ge('qr-img');if(!img)return;const a=document.createElement('a');a.href=img.src;a.download='qr.png';a.click() }
+function dlQR(){
+  const d=APP.qrCurrent; if(!d)return;
+  const img=new Image(); img.crossOrigin='anonymous';
+  img.onload=()=>{
+    try{
+      const pad=20, qr=200, cliF=15, serF=20, gap=10;
+      const w=qr+pad*2, h=pad+cliF+gap+qr+gap+serF+pad;
+      const cv=document.createElement('canvas'); cv.width=w; cv.height=h;
+      const ctx=cv.getContext('2d');
+      ctx.fillStyle='#fff'; ctx.fillRect(0,0,w,h);
+      ctx.fillStyle='#1a1a2e'; ctx.textAlign='center';
+      ctx.font=`700 ${cliF}px system-ui,sans-serif`;
+      ctx.fillText(d.cliente, w/2, pad+cliF-2, w-2*pad);
+      ctx.drawImage(img, pad, pad+cliF+gap, qr, qr);
+      ctx.font=`800 ${serF}px system-ui,sans-serif`;
+      ctx.fillText(d.serial, w/2, pad+cliF+gap+qr+gap+serF-4);
+      const a=document.createElement('a');
+      a.href=cv.toDataURL('image/png'); a.download=`qr-${d.serial}.png`; a.click();
+    }catch(err){
+      toast('No se pudo incluir el texto en la descarga, se descargó solo el QR','error');
+      const a=document.createElement('a'); a.href=d.qrUrl; a.download=`qr-${d.serial}.png`; a.click();
+    }
+  };
+  img.onerror=()=>{ const a=document.createElement('a'); a.href=d.qrUrl; a.download=`qr-${d.serial}.png`; a.click(); };
+  img.src=d.qrUrl;
+}
 function prtSerie(){
   const d=APP.qrCurrent; if(!d)return;
   const w=window.open('','_blank');
