@@ -193,6 +193,13 @@ tbody tr:hover td{background:#fafbff}
   .ph{flex-direction:column}
 }
 @media(max-width:480px){.stats{grid-template-columns:1fr}}
+.cli-wrap{position:relative}
+.cli-drop{display:none;position:absolute;z-index:60;left:0;right:0;top:calc(100% + 4px);background:#fff;border:1.5px solid var(--border);border-radius:10px;max-height:230px;overflow-y:auto;box-shadow:0 10px 30px rgba(0,0,0,.14)}
+.cli-opt{padding:9px 13px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--border)}
+.cli-opt:last-child{border-bottom:none}
+.cli-opt:hover{background:var(--surface)}
+.cli-opt-sub{color:var(--ink3);font-size:11px}
+.cli-empty{padding:10px 13px;font-size:12px;color:var(--ink3)}
 </style>
 </head>
 <body>
@@ -829,6 +836,31 @@ function pgCl(c){
   </div>`;
 }
 function fRows(tid,q){ qsa(`#${tid} tbody tr[data-s]`).forEach(r=>r.style.display=r.dataset.s.includes(q.toLowerCase())?'':'none') }
+
+// ── Buscador de cliente reutilizable (combobox con lupa) ──────────────────
+// base = id del campo (ej. 'ext-cl') → espera un input#{base}-q, un input hidden#{base} y un div#{base}-drop
+function cliOpts(q){
+  const nq=(q||'').trim().toLowerCase();
+  return DB.all('clientes').filter(c=>!nq||((c.empresa||'')+' '+(c.nit||'')).toLowerCase().includes(nq)).slice(0,50);
+}
+function cliDrop(base,q){
+  const drop=ge(base+'-drop'); if(!drop) return;
+  const items=cliOpts(q);
+  drop.innerHTML=items.map(c=>`<div class="cli-opt" onmousedown="cliPick('${base}','${c.id}')"><b>${c.empresa}</b>${c.nit?` <span class="cli-opt-sub">— NIT ${c.nit}</span>`:''}</div>`).join('')||'<div class="cli-empty">Sin resultados</div>';
+  drop.style.display='block';
+}
+function cliPick(base,id){
+  const c=DB.find('clientes',id);
+  const h=ge(base); if(h) h.value=id;
+  const q=ge(base+'-q'); if(q) q.value=c?c.empresa:'';
+  const d=ge(base+'-drop'); if(d) d.style.display='none';
+  if(base==='rec-cl') ldExtR(id);
+  if(base==='ent-cl') ldExtEnt(id);
+  if(base==='pres-cl') ldExtP(id);
+}
+document.addEventListener('click',e=>{
+  qsa('.cli-wrap').forEach(w=>{ if(!w.contains(e.target)){ const d=w.querySelector('.cli-drop'); if(d) d.style.display='none'; } });
+});
 function mCl(id){
   id=id||''; ge('m-cl-t').textContent=id?'Editar Cliente':'Nuevo Cliente'; ge('cl-id').value=id;
   const c=id?DB.find('clientes',id):{};
@@ -869,20 +901,29 @@ function verCl(id){
 function pgExt(c){
   const ex=DB.all('extintores'), cl=DB.all('clientes');
   c.innerHTML=`<div style="padding:28px">
-  <div class="ph"><div><div class="ph-t">🧯 Extintores</div><div class="ph-s">${ex.length} registrados</div></div><div class="ph-a"><select class="fc" style="width:auto" onchange="fAttr('t-ex','data-est',this.value)"><option value="">Todos los estados</option><option value="activo">Activo</option><option value="en_laboratorio">En laboratorio</option><option value="prestado">Prestado</option><option value="vencido">Vencido</option></select><button class="btn btn-pr" onclick="mExt()">+ Nuevo extintor</button></div></div>
+  <div class="ph"><div><div class="ph-t">🧯 Extintores</div><div class="ph-s">${ex.length} registrados</div></div><div class="ph-a"><input class="fc" id="ex-sc" placeholder="🔍 Buscar por cliente, serial..." style="width:220px" oninput="fExt()"><select class="fc" id="ex-est-f" style="width:auto" onchange="fExt()"><option value="">Todos los estados</option><option value="activo">Activo</option><option value="en_laboratorio">En laboratorio</option><option value="prestado">Prestado</option><option value="vencido">Vencido</option></select><button class="btn btn-pr" onclick="mExt()">+ Nuevo extintor</button></div></div>
   <div class="card"><div class="tw"><table id="t-ex"><thead><tr><th>Serial</th><th>Cliente</th><th>Ubicación</th><th>Tipo</th><th>Estado</th><th>Vencimiento</th><th>Acciones</th></tr></thead><tbody>
-  ${ex.map(e=>`<tr data-est="${e.estado}"><td><b>${e.serial}</b></td><td>${cN(e.clienteId)}</td><td>${e.ubicacion||'—'}</td><td>${e.tipo} ${e.capacidad||''}</td><td>${eB(e.estado)}</td><td>${vB(e.fechaVencimiento)}</td><td><div style="display:flex;gap:4px;flex-wrap:wrap"><button class="btn btn-se btn-sm" onclick="verHV('${e.id}')">📋 HV</button><button class="btn btn-ou btn-sm" onclick="showQR('${e.id}','${e.serial}')">📱 QR</button><button class="btn btn-gh btn-sm" onclick="mExt('${e.id}')">✏️</button>${isC()?`<button class="btn btn-da btn-sm" onclick="delExt('${e.id}','${e.serial}')">🗑️</button>`:''}</div></td></tr>`).join('')||'<tr><td colspan="7"><div class="empty"><div class="empty-ic">🧯</div><div class="empty-t">Sin extintores</div></div></td></tr>'}
+  ${ex.map(e=>`<tr data-est="${e.estado}" data-s="${(cN(e.clienteId)+' '+e.serial+' '+(e.ubicacion||'')).toLowerCase()}"><td><b>${e.serial}</b></td><td>${cN(e.clienteId)}</td><td>${e.ubicacion||'—'}</td><td>${e.tipo} ${e.capacidad||''}</td><td>${eB(e.estado)}</td><td>${vB(e.fechaVencimiento)}</td><td><div style="display:flex;gap:4px;flex-wrap:wrap"><button class="btn btn-se btn-sm" onclick="verHV('${e.id}')">📋 HV</button><button class="btn btn-ou btn-sm" onclick="showQR('${e.id}','${e.serial}')">📱 QR</button><button class="btn btn-gh btn-sm" onclick="mExt('${e.id}')">✏️</button>${isC()?`<button class="btn btn-da btn-sm" onclick="delExt('${e.id}','${e.serial}')">🗑️</button>`:''}</div></td></tr>`).join('')||'<tr><td colspan="7"><div class="empty"><div class="empty-ic">🧯</div><div class="empty-t">Sin extintores</div></div></td></tr>'}
   </tbody></table></div></div>
-  <div class="ov" id="m-ext"><div class="modal"><div class="mh"><span class="mt" id="m-ext-t">Extintor</span><button class="mc btn" onclick="closeM('m-ext')">✕</button></div><div class="mb"><input type="hidden" id="ext-id"><div class="fg"><label>Cliente <span class="req">*</span></label><select class="fc" id="ext-cl"><option value="">Seleccionar...</option>${cl.map(c2=>`<option value="${c2.id}">${c2.empresa}</option>`).join('')}</select></div><div class="fg2"><div class="fg"><label>Serial <span class="req">*</span></label><input class="fc" id="ext-ser"></div><div class="fg"><label>Ubicación <span class="req">*</span></label><input class="fc" id="ext-ub"></div><div class="fg"><label>Tipo</label><select class="fc" id="ext-tp"><option>ABC</option><option>CO2</option><option>Tipo K</option><option>Solkaflam</option><option>PQS</option></select></div><div class="fg"><label>Capacidad</label><input class="fc" id="ext-cap" placeholder="10L"></div><div class="fg"><label>Libras (CO2/K)</label><input class="fc" id="ext-lib" type="number"></div><div class="fg"><label>MMT</label><input class="fc" id="ext-mmt" type="number"></div><div class="fg"><label>Vencimiento <span class="req">*</span></label><input class="fc" id="ext-ven" type="date"></div><div class="fg"><label>Estado</label><select class="fc" id="ext-est"><option value="activo">Activo</option><option value="en_laboratorio">En laboratorio</option><option value="prestado">Prestado</option><option value="vencido">Vencido</option></select></div></div></div><div class="mf"><button class="btn btn-se" onclick="closeM('m-ext')">Cancelar</button><button class="btn btn-pr" onclick="saveExt()">💾 Guardar</button></div></div></div>
+  <div class="ov" id="m-ext"><div class="modal"><div class="mh"><span class="mt" id="m-ext-t">Extintor</span><button class="mc btn" onclick="closeM('m-ext')">✕</button></div><div class="mb"><input type="hidden" id="ext-id"><div class="fg"><label>Cliente <span class="req">*</span></label><div class="cli-wrap"><input class="fc" id="ext-cl-q" placeholder="🔍 Buscar cliente por nombre o NIT..." autocomplete="off" oninput="cliDrop('ext-cl',this.value)" onfocus="cliDrop('ext-cl',this.value)"><input type="hidden" id="ext-cl"><div class="cli-drop" id="ext-cl-drop"></div></div></div><div class="fg2"><div class="fg"><label>Serial <span class="req">*</span></label><input class="fc" id="ext-ser"></div><div class="fg"><label>Ubicación <span class="req">*</span></label><input class="fc" id="ext-ub"></div><div class="fg"><label>Tipo</label><select class="fc" id="ext-tp"><option>ABC</option><option>CO2</option><option>Tipo K</option><option>Solkaflam</option><option>PQS</option></select></div><div class="fg"><label>Capacidad</label><input class="fc" id="ext-cap" placeholder="10L"></div><div class="fg"><label>Libras (CO2/K)</label><input class="fc" id="ext-lib" type="number"></div><div class="fg"><label>MMT</label><input class="fc" id="ext-mmt" type="number"></div><div class="fg"><label>Vencimiento <span class="req">*</span></label><input class="fc" id="ext-ven" type="date"></div><div class="fg"><label>Estado</label><select class="fc" id="ext-est"><option value="activo">Activo</option><option value="en_laboratorio">En laboratorio</option><option value="prestado">Prestado</option><option value="vencido">Vencido</option></select></div></div></div><div class="mf"><button class="btn btn-se" onclick="closeM('m-ext')">Cancelar</button><button class="btn btn-pr" onclick="saveExt()">💾 Guardar</button></div></div></div>
   <div class="ov" id="m-hv"><div class="modal lg"><div class="mh"><span class="mt" id="m-hv-t">Hoja de Vida</span><button class="mc btn" onclick="closeM('m-hv')">✕</button></div><div class="mb" id="m-hv-b"></div><div class="mf"><button class="btn btn-se" onclick="closeM('m-hv')">Cerrar</button><button class="btn btn-pr" onclick="prtHV()">🖨️ Imprimir</button></div></div></div>
   <div class="ov" id="m-qr"><div class="modal sm"><div class="mh"><span class="mt">📱 Código QR</span><button class="mc btn" onclick="closeM('m-qr')">✕</button></div><div class="mb" id="m-qr-b" style="text-align:center"></div><div class="mf"><button class="btn btn-se" onclick="closeM('m-qr')">Cerrar</button><button class="btn btn-pr" onclick="dlQR()">⬇️ Descargar</button></div></div></div>
   </div>`;
 }
 function fAttr(tid,at,v){ qsa(`#${tid} tbody tr`).forEach(r=>r.style.display=(!v||r.getAttribute(at)===v)?'':'none') }
+function fExt(){
+  const q=(ge('ex-sc')?.value||'').toLowerCase().trim();
+  const est=ge('ex-est-f')?.value||'';
+  qsa('#t-ex tbody tr[data-s]').forEach(r=>{
+    const okQ=!q||r.dataset.s.includes(q);
+    const okE=!est||r.getAttribute('data-est')===est;
+    r.style.display=(okQ&&okE)?'':'none';
+  });
+}
 function mExt(id){
   id=id||''; ge('m-ext-t').textContent=id?'Editar Extintor':'Nuevo Extintor'; ge('ext-id').value=id;
   const e=id?DB.find('extintores',id):{};
-  ge('ext-cl').value=e.clienteId||''; ge('ext-ser').value=e.serial||''; ge('ext-ub').value=e.ubicacion||'';
+  ge('ext-cl').value=e.clienteId||''; ge('ext-cl-q').value=e.clienteId?cN(e.clienteId):''; ge('ext-ser').value=e.serial||''; ge('ext-ub').value=e.ubicacion||'';
   ge('ext-tp').value=e.tipo||'ABC'; ge('ext-cap').value=e.capacidad||''; ge('ext-lib').value=e.libras||'';
   ge('ext-mmt').value=e.mmt||''; ge('ext-ven').value=e.fechaVencimiento||''; ge('ext-est').value=e.estado||'activo';
   // Cargar foto existente
@@ -1018,7 +1059,7 @@ async function pgRec(c){
         <div style="font-size:12px;font-weight:700;color:var(--ink2);">🏢 Cliente <span style="color:var(--red)">*</span></div>
         <button onclick="togglePanel('panel-nuevo-cl-rec','btn-nuevo-cl-rec')" id="btn-nuevo-cl-rec" style="background:var(--green);color:#fff;border:none;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">+ Crear cliente</button>
       </div>
-      <select class="fc" id="rec-cl" onchange="ldExtR(this.value)" style="margin-bottom:10px;"><option value="">Seleccionar cliente existente...</option>${cl.map(c2=>`<option value="${c2.id}">${c2.empresa}${c2.nit?' — NIT '+c2.nit:''}</option>`).join('')}</select>
+      <div class="cli-wrap" style="margin-bottom:10px;"><input class="fc" id="rec-cl-q" placeholder="🔍 Buscar cliente existente por nombre o NIT..." autocomplete="off" oninput="cliDrop('rec-cl',this.value)" onfocus="cliDrop('rec-cl',this.value)"><input type="hidden" id="rec-cl"><div class="cli-drop" id="rec-cl-drop"></div></div>
       <div id="rec-cl-info" style="display:none;background:var(--bg);border-radius:8px;padding:10px;font-size:12px;color:var(--ink3);margin-bottom:8px;"></div>
       <!-- CREAR CLIENTE NUEVO -->
       <div id="panel-nuevo-cl-rec" style="display:none;border-top:1px solid var(--border);padding-top:12px;margin-top:4px;">
@@ -1122,16 +1163,9 @@ function crearClienteEnOrden(tipo){
     activo:    true
   });
 
-  // Agregar al select y seleccionar
-  const selId = tipo==='rec' ? 'rec-cl' : 'ent-cl';
-  const sel=ge(selId);
-  if(sel){
-    const opt=document.createElement('option');
-    opt.value=nuevo.id; opt.textContent=empresa+(nuevo.nit?' — NIT '+nuevo.nit:'');
-    opt.selected=true;
-    sel.appendChild(opt);
-    sel.dispatchEvent(new Event('change'));
-  }
+  // Seleccionar en el buscador de cliente
+  const baseId = tipo==='rec' ? 'rec-cl' : 'ent-cl';
+  cliPick(baseId, nuevo.id);
 
   const msgId = tipo==='rec' ? 'msg-nuevo-cl-rec' : 'msg-nuevo-cl-ent';
   const msg=ge(msgId);
@@ -1404,7 +1438,7 @@ async function pgEnt(c){
         <div style="font-size:12px;font-weight:700;color:var(--ink2);">🏢 Cliente <span style="color:var(--red)">*</span></div>
         <button onclick="togglePanel('panel-nuevo-cl-ent','btn-nuevo-cl-ent')" id="btn-nuevo-cl-ent" style="background:var(--green);color:#fff;border:none;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">+ Crear cliente</button>
       </div>
-      <select class="fc" id="ent-cl" onchange="ldExtEnt(this.value)" style="margin-bottom:10px;"><option value="">Seleccionar cliente existente...</option>${DB.all('clientes').map(c2=>`<option value="${c2.id}">${c2.empresa}${c2.nit?' — NIT '+c2.nit:''}</option>`).join('')}</select>
+      <div class="cli-wrap" style="margin-bottom:10px;"><input class="fc" id="ent-cl-q" placeholder="🔍 Buscar cliente existente por nombre o NIT..." autocomplete="off" oninput="cliDrop('ent-cl',this.value)" onfocus="cliDrop('ent-cl',this.value)"><input type="hidden" id="ent-cl"><div class="cli-drop" id="ent-cl-drop"></div></div>
       <div id="ent-cl-info" style="display:none;background:var(--bg);border-radius:8px;padding:10px;font-size:12px;color:var(--ink3);margin-bottom:8px;"></div>
       <!-- CREAR CLIENTE NUEVO -->
       <div id="panel-nuevo-cl-ent" style="display:none;border-top:1px solid var(--border);padding-top:12px;margin-top:4px;">
@@ -1563,7 +1597,7 @@ function pgVis(c){
   <div class="card"><div class="tw"><table><thead><tr><th>Fecha</th><th>Cliente</th><th>Tipo</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>
   ${vs.map(v=>`<tr><td>${fD(v.fechaProgramada)}</td><td><b>${cN(v.clienteId)}</b></td><td><span class="badge ${v.tipo==='inspeccion'?'bb':'bp'}">${v.tipo==='inspeccion'?'Inspección':'Revisión'}</span></td><td>${oB(v.estado)}</td><td><div style="display:flex;gap:4px">${isC()?`<button class="btn btn-da btn-sm" onclick="delVis('${v.id}')">🗑️</button>`:''}</div></td></tr>`).join('')||'<tr><td colspan="5"><div class="empty"><div class="empty-ic">📋</div><div class="empty-t">Sin visitas</div></div></td></tr>'}
   </tbody></table></div></div>
-  <div class="ov" id="m-vis"><div class="modal"><div class="mh"><span class="mt">Nueva Visita</span><button class="mc btn" onclick="closeM('m-vis')">✕</button></div><div class="mb"><div class="fg2"><div class="fg"><label>Cliente <span class="req">*</span></label><select class="fc" id="vis-cl"><option value="">Seleccionar...</option>${cl.map(c2=>`<option value="${c2.id}">${c2.empresa}</option>`).join('')}</select></div><div class="fg"><label>Tipo</label><select class="fc" id="vis-tp"><option value="inspeccion">Inspección</option><option value="revision">Revisión</option></select></div><div class="fg"><label>Fecha</label><input class="fc" id="vis-fe" type="date"></div><div class="fg"><label>Vendedor</label><select class="fc" id="vis-ven">${DB.all('usuarios').filter(u=>u.rol==='vendedor'||u.rol==='coordinador').map(u=>`<option value="${u.id}">${u.nombre}</option>`).join('')}</select></div></div></div><div class="mf"><button class="btn btn-se" onclick="closeM('m-vis')">Cancelar</button><button class="btn btn-pr" onclick="saveVis()">Programar</button></div></div></div>
+  <div class="ov" id="m-vis"><div class="modal"><div class="mh"><span class="mt">Nueva Visita</span><button class="mc btn" onclick="closeM('m-vis')">✕</button></div><div class="mb"><div class="fg2"><div class="fg"><label>Cliente <span class="req">*</span></label><div class="cli-wrap"><input class="fc" id="vis-cl-q" placeholder="🔍 Buscar cliente por nombre o NIT..." autocomplete="off" oninput="cliDrop('vis-cl',this.value)" onfocus="cliDrop('vis-cl',this.value)"><input type="hidden" id="vis-cl"><div class="cli-drop" id="vis-cl-drop"></div></div></div><div class="fg"><label>Tipo</label><select class="fc" id="vis-tp"><option value="inspeccion">Inspección</option><option value="revision">Revisión</option></select></div><div class="fg"><label>Fecha</label><input class="fc" id="vis-fe" type="date"></div><div class="fg"><label>Vendedor</label><select class="fc" id="vis-ven">${DB.all('usuarios').filter(u=>u.rol==='vendedor'||u.rol==='coordinador').map(u=>`<option value="${u.id}">${u.nombre}</option>`).join('')}</select></div></div></div><div class="mf"><button class="btn btn-se" onclick="closeM('m-vis')">Cancelar</button><button class="btn btn-pr" onclick="saveVis()">Programar</button></div></div></div>
   </div>`;
 }
 function mVis(){ openM('m-vis') }
@@ -1578,7 +1612,7 @@ function pgPres(c){
   <div class="card"><div class="tw"><table><thead><tr><th>Extintor</th><th>Cliente</th><th>Prestado</th><th>Devolución</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>
   ${ps.map(p=>`<tr><td><b>${eS(p.extintor)}</b></td><td>${cN(p.clienteId)}</td><td>${fD(p.fechaPrestamo)}</td><td>${fD(p.fechaDevolucionEstimada)}</td><td>${p.estado==='activo'?'<span class="badge ba">Activo</span>':'<span class="badge bg">Devuelto</span>'}</td><td><div style="display:flex;gap:4px">${p.estado==='activo'?`<button class="btn btn-gr btn-sm" onclick="devPres('${p.id}')">↩️ Devuelto</button>`:''}${isC()?`<button class="btn btn-da btn-sm" onclick="delPres('${p.id}')">🗑️</button>`:''}</div></td></tr>`).join('')||'<tr><td colspan="6"><div class="empty"><div class="empty-ic">🔄</div><div class="empty-t">Sin préstamos</div></div></td></tr>'}
   </tbody></table></div></div>
-  <div class="ov" id="m-pres"><div class="modal"><div class="mh"><span class="mt">Nuevo Préstamo</span><button class="mc btn" onclick="closeM('m-pres')">✕</button></div><div class="mb"><div class="al al-a">⚠️ Solo coordinador puede autorizar préstamos</div><div class="fg"><label>Cliente <span class="req">*</span></label><select class="fc" id="pres-cl" onchange="ldExtP(this.value)"><option value="">Seleccionar...</option>${DB.all('clientes').map(c2=>`<option value="${c2.id}">${c2.empresa}</option>`).join('')}</select></div><div class="fg"><label>Extintor <span class="req">*</span></label><select class="fc" id="pres-ext"><option value="">Selecciona cliente primero</option></select></div><div class="fg2"><div class="fg"><label>Fecha</label><input class="fc" id="pres-fe" type="date" value="${new Date().toISOString().split('T')[0]}"></div><div class="fg"><label>Devolución est.</label><input class="fc" id="pres-dev" type="date"></div></div><div class="fg"><label>Observaciones</label><textarea class="fc" id="pres-obs" rows="2"></textarea></div></div><div class="mf"><button class="btn btn-se" onclick="closeM('m-pres')">Cancelar</button><button class="btn btn-pr" onclick="savePres()">Registrar</button></div></div></div>
+  <div class="ov" id="m-pres"><div class="modal"><div class="mh"><span class="mt">Nuevo Préstamo</span><button class="mc btn" onclick="closeM('m-pres')">✕</button></div><div class="mb"><div class="al al-a">⚠️ Solo coordinador puede autorizar préstamos</div><div class="fg"><label>Cliente <span class="req">*</span></label><div class="cli-wrap"><input class="fc" id="pres-cl-q" placeholder="🔍 Buscar cliente por nombre o NIT..." autocomplete="off" oninput="cliDrop('pres-cl',this.value)" onfocus="cliDrop('pres-cl',this.value)"><input type="hidden" id="pres-cl"><div class="cli-drop" id="pres-cl-drop"></div></div></div><div class="fg"><label>Extintor <span class="req">*</span></label><select class="fc" id="pres-ext"><option value="">Selecciona cliente primero</option></select></div><div class="fg2"><div class="fg"><label>Fecha</label><input class="fc" id="pres-fe" type="date" value="${new Date().toISOString().split('T')[0]}"></div><div class="fg"><label>Devolución est.</label><input class="fc" id="pres-dev" type="date"></div></div><div class="fg"><label>Observaciones</label><textarea class="fc" id="pres-obs" rows="2"></textarea></div></div><div class="mf"><button class="btn btn-se" onclick="closeM('m-pres')">Cancelar</button><button class="btn btn-pr" onclick="savePres()">Registrar</button></div></div></div>
   </div>`;
 }
 function ldExtP(cid){ const ex=DB.all('extintores').filter(e=>e.clienteId===cid&&e.estado==='activo'); const s=ge('pres-ext'); if(!s)return; s.innerHTML=ex.length?ex.map(e=>`<option value="${e.id}">${e.serial} — ${e.tipo}</option>`).join(''):'<option value="">Sin extintores activos</option>'; }
