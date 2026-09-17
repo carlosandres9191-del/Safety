@@ -907,7 +907,7 @@ function pgExt(c){
   </tbody></table></div></div>
   <div class="ov" id="m-ext"><div class="modal"><div class="mh"><span class="mt" id="m-ext-t">Extintor</span><button class="mc btn" onclick="closeM('m-ext')">✕</button></div><div class="mb"><input type="hidden" id="ext-id"><div class="fg"><label>Cliente <span class="req">*</span></label><div class="cli-wrap"><input class="fc" id="ext-cl-q" placeholder="🔍 Buscar cliente por nombre o NIT..." autocomplete="off" oninput="cliDrop('ext-cl',this.value)" onfocus="cliDrop('ext-cl',this.value)"><input type="hidden" id="ext-cl"><div class="cli-drop" id="ext-cl-drop"></div></div></div><div class="fg2"><div class="fg"><label>Serial <span class="req">*</span></label><input class="fc" id="ext-ser"></div><div class="fg"><label>Ubicación <span class="req">*</span></label><input class="fc" id="ext-ub"></div><div class="fg"><label>Tipo</label><select class="fc" id="ext-tp"><option>ABC</option><option>CO2</option><option>Tipo K</option><option>Solkaflam</option><option>PQS</option></select></div><div class="fg"><label>Capacidad</label><input class="fc" id="ext-cap" placeholder="10L"></div><div class="fg"><label>Libras (CO2/K)</label><input class="fc" id="ext-lib" type="number"></div><div class="fg"><label>MMT</label><input class="fc" id="ext-mmt" type="number"></div><div class="fg"><label>Vencimiento <span class="req">*</span></label><input class="fc" id="ext-ven" type="date"></div><div class="fg"><label>Estado</label><select class="fc" id="ext-est"><option value="activo">Activo</option><option value="en_laboratorio">En laboratorio</option><option value="prestado">Prestado</option><option value="vencido">Vencido</option></select></div></div></div><div class="mf"><button class="btn btn-se" onclick="closeM('m-ext')">Cancelar</button><button class="btn btn-pr" onclick="saveExt()">💾 Guardar</button></div></div></div>
   <div class="ov" id="m-hv"><div class="modal lg"><div class="mh"><span class="mt" id="m-hv-t">Hoja de Vida</span><button class="mc btn" onclick="closeM('m-hv')">✕</button></div><div class="mb" id="m-hv-b"></div><div class="mf"><button class="btn btn-se" onclick="closeM('m-hv')">Cerrar</button><button class="btn btn-pr" onclick="prtHV()">🖨️ Imprimir</button></div></div></div>
-  <div class="ov" id="m-qr"><div class="modal sm"><div class="mh"><span class="mt">📱 Código QR</span><button class="mc btn" onclick="closeM('m-qr')">✕</button></div><div class="mb" id="m-qr-b" style="text-align:center"></div><div class="mf"><button class="btn btn-se" onclick="closeM('m-qr')">Cerrar</button><button class="btn btn-ou" onclick="prtSerie()">🏷️ Serie</button><button class="btn btn-pr" onclick="dlQR()">⬇️ Descargar</button></div></div></div>
+  <div class="ov" id="m-qr"><div class="modal sm"><div class="mh"><span class="mt">📱 Código QR</span><button class="mc btn" onclick="closeM('m-qr')">✕</button></div><div class="mb" id="m-qr-b" style="text-align:center"></div><div class="mf"><button class="btn btn-se" onclick="closeM('m-qr')">Cerrar</button><button class="btn btn-gh" onclick="prtQR()">🖨️ Imprimir</button><button class="btn btn-ou" onclick="prtSerie()">🏷️ Serie</button><button class="btn btn-pr" onclick="dlQR()">⬇️ Descargar</button></div></div></div>
   </div>`;
 }
 function fAttr(tid,at,v){ qsa(`#${tid} tbody tr`).forEach(r=>r.style.display=(!v||r.getAttribute(at)===v)?'':'none') }
@@ -1044,6 +1044,17 @@ function dlQR(){
   };
   img.onerror=()=>{ const a=document.createElement('a'); a.href=d.qrUrl; a.download=`qr-${d.serial}.png`; a.click(); };
   img.src=d.qrUrl;
+}
+function prtQR(){
+  const d=APP.qrCurrent; if(!d)return;
+  const w=window.open('','_blank');
+  w.document.write(`<!DOCTYPE html><html><head><title>QR ${d.serial}</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}.label{text-align:center;border:2px dashed #1a1a2e;border-radius:12px;padding:24px 30px}.cli{font-size:15px;font-weight:700;margin-bottom:12px}.ser{font-size:18px;font-weight:800;margin-top:12px}img{width:200px;height:200px}</style></head><body><div class="label"><div class="cli">${d.cliente}</div><img id="qi" src="${d.qrUrl}"><div class="ser">${d.serial}</div></div></body></html>`);
+  w.document.close();
+  let done=false;
+  const go=()=>{ if(done)return; done=true; w.print(); };
+  const img=w.document.getElementById('qi');
+  if(img.complete) go(); else img.onload=go;
+  setTimeout(go,1200);
 }
 function prtSerie(){
   const d=APP.qrCurrent; if(!d)return;
